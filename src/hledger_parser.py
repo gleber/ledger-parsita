@@ -1,10 +1,13 @@
 from collections.abc import Sequence
+from dataclasses import replace
+from pathlib import Path
 from parsita import *
 
 from parsita.util import splat
-from datetime import date as date_class
+from datetime import date as date_class, datetime as datetime_class  # Import datetime
 from decimal import Decimal
 from .classes import (
+    Include,
     Transaction,
     Posting,
     Amount,
@@ -12,16 +15,20 @@ from .classes import (
     Commodity,
     Cost,
     CostKind,  # Import CostKind
+    Comment,
     Tag,
     Status,
     MarketPrice,
     AccountDirective,
     File,
-    JournalSource,
+    JournalEntry,
     Report,
     Journal,
     SourceLocation,
     PositionAware,  # Import PositionAware
+    CommodityDirective,  # Import CommodityDirective
+    Alias,  # Import Alias
+    MarketPrice,  # Import MarketPrice
 )
 
 from abc import abstractmethod
@@ -83,6 +90,7 @@ def listify(x):
         return x
     return [x]
 
+
 def oneify(x, default=None):
     if not isinstance(x, Sequence):
         raise Exception("BAD VALUE")
@@ -109,6 +117,17 @@ class HledgerParsers(ParserContext, whitespace=None):
         lambda parts: date_class(*parts)
     )
 
+    # Time parser (HH:MM:SS or HH:MM)
+    hour = reg(r"\d{2}") > int
+    minute = reg(r"\d{2}") > int
+    second = reg(r"\d{2}") > int
+    time = hour << lit(":") & minute & opt(lit(":") >> second) > (
+        lambda parts: datetime_class.strptime(
+            f"{parts[0]:02}:{parts[1]:02}:{parts[2][0] if parts[2] else 0:02}",
+            "%H:%M:%S",
+        ).time()
+    )
+
     status = opt(lit("*", "!")) > (lambda s: Status(s[0]) if s else Status.Unmarked)
     payee = reg(r"[^\n]*")
 
@@ -121,30 +140,36 @@ class HledgerParsers(ParserContext, whitespace=None):
 
     # Amount can have commas and an optional decimal
     # Transform amount string into Decimal
-    amount_value = reg(r"[-+]?[\d,]*\d(\.\d*)?") > (
-        lambda s: Decimal(s.replace(",", ""))
+    amount_value = reg(r"[-+]?[\d, ]*\d(\.\d*)?") > (
+        lambda s: Decimal(s.replace(",", "").replace(" ", ""))
     )
 
     # Currency can be one or more uppercase letters or anything in double quotes
     # Transform currency string into Commodity object (removing quotes if present)
     currency = positioned(
-        reg(r'"[^"]+"|[A-Za-z]+') > (lambda name: Commodity(name=name.strip('"'))),
+        reg(r'"[^"]+"|\$|[A-Za-z]+') > (lambda name: Commodity(name=name.strip('"'))),
         filename="",
     )  # Filename will be populated later
 
-    # Amount with optional currency
-    amount = positioned(
-        (amount_value & opt(ws >> currency))
-        > (
-            lambda parts: Amount(
-                quantity=parts[0],
-                commodity=parts[1][0] if parts[1] else Commodity(name=""),
-            )
-        ),
-        filename="",
-    )  # Handle optional currency, Filename will be populated later
+    # Amount parser supporting: QUANTITY [CURRENCY] or CURRENCY QUANTITY
+    amount_qty_first = amount_value & opt(ws >> currency) > (
+        lambda parts: Amount(
+            quantity=parts[0], commodity=parts[1][0] if parts[1] else Commodity(name="")
+        )
+    )
+    amount_cur_first = currency & opt(ws) >> amount_value > (
+        lambda parts: Amount(quantity=parts[1], commodity=parts[0])
+    )  # Allow optional space
+    amount_no_cur = amount_value > (
+        lambda qty: Amount(quantity=qty, commodity=Commodity(name=""))
+    )  # Handle amount without currency
 
-    balance = lit('=') >> ws >> amount
+    amount = positioned(
+        (amount_qty_first | amount_cur_first | amount_no_cur),
+        filename="",
+    )  # Filename will be populated later
+
+    balance = lit("=") >> ws >> amount
 
     # Cost
     cost = positioned(
@@ -154,6 +179,8 @@ class HledgerParsers(ParserContext, whitespace=None):
     )  # Filename will be populated later
 
     comment_text = lit(";") >> ows >> reg(r"[^\n]*")
+
+    top_comment = ows >> lit(";", "#") >> ows >> reg(r"[^\n]*") > Comment
 
     # A non-indented posting
     posting = positioned(
@@ -209,22 +236,109 @@ class HledgerParsers(ParserContext, whitespace=None):
         filename="",
     )  # Filename will be populated later
 
-    # Balance assertion: account name, equals sign, amount
-    balance_assertion = positioned(
-        account_name & (ws >> lit("=") >> ws >> amount)
-        > (lambda parts: Balance(account=parts[0], amount=parts[1])),
-        filename="",  # Filename will be populated later
+    filename = reg(r"[A-Za-z0-9/\._\-]+")  # Allow digits and hyphens in filenames
+
+    include = positioned(
+        lit("include") >> ws >> filename > (lambda fn: Include(filename=fn)),
+        filename="",
     )
 
-    tli = transaction | balance_assertion
+    commodity_directive = positioned(
+        lit("commodity") >> opt(ws >> amount_value)
+        & ws >> currency
+        & opt(ws >> comment_text)
+        > (
+            lambda parts: CommodityDirective(
+                commodity=parts[1],
+                example_amount=oneify(parts[0]),
+                comment=oneify(parts[2]),
+            )
+        ),
+        filename="",
+    )
 
-    # The full journal is just a repetition of top-level items (transactions or balance assertions).
+    account_directive = positioned(
+        lit("account") >> ws >> account_name & opt(ws >> comment_text)
+        > (lambda parts: AccountDirective(name=parts[0], comment=oneify(parts[1]))),
+        filename="",
+    )
+
+    # Alias directive: alias <PATTERN> = <TARGET_ACCOUNT>
+    alias_directive = positioned(
+        lit("alias") >> ws >> reg(r"[^\s=]+") << ws << lit("=") << ws & account_name
+        > (lambda parts: Alias(pattern=parts[0], target_account=parts[1])),
+        filename="",
+    )
+
+    # Price directive: P DATE [TIME] COMMODITY UNITPRICE
+    price_directive = positioned(
+        lit("P") >> ws >> date
+        & opt(ws >> time)
+        & ws >> currency
+        & ws >> amount
+        & opt(ws >> comment_text)
+        > (
+            lambda parts: MarketPrice(
+                date=parts[0],
+                time=oneify(parts[1]),
+                commodity=parts[2],
+                unit_price=parts[3],
+                comment=oneify(parts[4]),
+            )
+        ),  # Corrected indices
+        filename="",
+    )
+
+    tli = (
+        transaction
+        | include
+        | commodity_directive
+        | account_directive
+        | alias_directive
+        | price_directive
+        | top_comment
+    )  # Add price_directive
+
+    # The full journal is just a repetition of top-level items (transactions or includes or etc).
     # Each top-level item is separated by one or more whitespace lines.
-    journal = aws >> repsep(tli, rep(ows << newline)) << aws > (lambda items: items)
+    journal = aws >> repsep(tli, rep(ows << newline)) << aws > (
+        lambda items: Journal(
+            # Filter out string comments before creating JournalEntry objects. Skip comments.
+            entries=[
+                JournalEntry.create(i) for i in items if not isinstance(i, Comment)
+            ]
+        )
+    )
 
 
-def parse_hledger_journal(file_content, filename=""):
-    return HledgerParsers.journal.parse(file_content)
+def recursive_include(journal: Journal, journal_fn: str):
+    parent_journal_dir = Path(journal_fn).parent
+
+    def include_one(entry: JournalEntry):
+        if not entry.include:
+            return entry
+        include = entry.include
+        include = replace(
+            entry.include,
+            journal=parse_hledger_journal(Path(parent_journal_dir, include.filename)),
+        )
+        return replace(entry, include=include)
+
+    entries = [include_one(i) for i in journal.entries]
+    return replace(journal, entries=entries)
+
+
+def parse_hledger_journal_content(file_content, filename=""):
+    journal = HledgerParsers.journal.parse(file_content).unwrap()
+    journal = journal.set_filename(filename)
+    return recursive_include(journal, filename)
+
+
+def parse_hledger_journal(filename: str):
+    path = Path(filename)
+    file_content = path.read_text()
+    full_filename = path.absolute()
+    return parse_hledger_journal_content(file_content, full_filename)
 
 
 if __name__ == "__main__":

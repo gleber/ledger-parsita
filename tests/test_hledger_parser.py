@@ -2,7 +2,7 @@ from pathlib import Path
 import unittest
 import sys
 import os
-from datetime import date as date_class
+from datetime import date as date_class, time as time_class # Import time
 from decimal import Decimal
 
 from parsita import Success, Failure
@@ -10,9 +10,13 @@ from parsita import Success, Failure
 # Add the parent directory of src to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.hledger_parser import HledgerParsers
+from src.hledger_parser import HledgerParsers, parse_hledger_journal
 from src.classes import (
+    CommodityDirective,
     CostKind,
+    Include,
+    Journal,
+    JournalEntry,
     Status,
     AccountName,
     Commodity,
@@ -21,6 +25,7 @@ from src.classes import (
     Tag,
     Posting,
     Transaction,
+    MarketPrice, # Import MarketPrice
 )
 
 
@@ -78,7 +83,9 @@ class TestHledgerParsers(unittest.TestCase):
             result.strip_loc(),
             Cost(
                 kind=CostKind.UnitCost,
-                amount=Amount(quantity=Decimal("19881.00134"), commodity=Commodity("PseudoUSD")),
+                amount=Amount(
+                    quantity=Decimal("19881.00134"), commodity=Commodity("PseudoUSD")
+                ),
             ),
         )
 
@@ -385,7 +392,7 @@ class TestHledgerParsers(unittest.TestCase):
         journal_text = ""
         result = HledgerParsers.journal.parse(journal_text)
         parsed_journal = result.unwrap()
-        self.assertEqual(parsed_journal, [])
+        self.assertEqual(parsed_journal, Journal())
 
     def test_journal_parser_one_transactions(self):
         journal_text = """2024-01-01 * Transaction One
@@ -429,7 +436,10 @@ class TestHledgerParsers(unittest.TestCase):
         self.assertEqual(posting.account.parts, ["assets", "broker", "revolut"])
 
         self.assertIsNone(posting.amount)
-        self.assertEqual(posting.balance.strip_loc(), Amount(quantity= Decimal("0"), commodity=Commodity("SOL")))
+        self.assertEqual(
+            posting.balance.strip_loc(),
+            Amount(quantity=Decimal("0"), commodity=Commodity("SOL")),
+        )
 
     def test_pure_balance_assertion_algo(self):
         balance_text = "= 2557.2145917 ALGO"
@@ -441,12 +451,187 @@ class TestHledgerParsers(unittest.TestCase):
         result = HledgerParsers.posting.parse(balance_text)
         posting = result.unwrap()
 
-    # @unittest.skip("Skip this test, until all other tests are successful")
     def test_all_journal(self):
-        # Whenever any other tests, skip this one with @unittest.skip annotation
         example_journal_fn = "examples/all.txt"
         result = HledgerParsers.journal.parse(Path(example_journal_fn).read_text())
         parsed_journal = result.unwrap()
+
+    def test_journal_parser_two_transactions(self):
+        journal_text = """
+include foo.bar    
+"""
+        result = HledgerParsers.journal.parse(journal_text)
+        parsed_journal = result.unwrap().strip_loc()
+        self.assertEqual(len(parsed_journal), 1)
+        self.assertIsInstance(parsed_journal.entries[0], JournalEntry)
+        self.assertIsNotNone(parsed_journal.entries[0].include)
+        self.assertEqual(parsed_journal.entries[0].include, Include(filename="foo.bar"))
+
+    # @unittest.skip("Skip this test, until all other tests are successful")
+    def test_recursive_journal(self):
+        result = parse_hledger_journal("examples/taxes/all.journal").strip_loc()
+        self.assertEqual(len(result.entries), 13)
+        self.assertEqual(
+            result.entries[0].include.filename, "directives.journal"
+        )
+
+    def test_commodity_directive_simple(self):
+        directive_text = "commodity USD"
+        result = HledgerParsers.commodity_directive.parse(directive_text).unwrap()
+        self.assertEqual(
+            result.strip_loc(),
+            CommodityDirective(commodity=Commodity(name="USD"), comment=None),
+        )
+        self.assertIsNotNone(result.source_location)
+        self.assertEqual(result.source_location.offset, 0)
+        self.assertEqual(result.source_location.length, len(directive_text))
+        self.assertEqual(result.source_location.filename, "")
+
+    def test_commodity_directive_with_comment(self):
+        directive_text = "commodity EUR ; format 1.000,00 EUR"
+        result = HledgerParsers.commodity_directive.parse(directive_text).unwrap()
+        self.assertEqual(
+            result.strip_loc(),
+            CommodityDirective(
+                commodity=Commodity(name="EUR"), comment="format 1.000,00 EUR"
+            ),
+        )
+        self.assertIsNotNone(result.source_location)
+        self.assertEqual(result.source_location.offset, 0)
+        self.assertEqual(result.source_location.length, len(directive_text))
+        self.assertEqual(result.source_location.filename, "")
+
+    def test_journal_with_commodity_directive(self):
+        journal_text = """
+commodity USD
+
+2024-01-01 * Transaction One
+    assets:account1    100 USD
+    expenses:category   -100 USD
+
+include other.journal
+"""
+        result = HledgerParsers.journal.parse(journal_text).unwrap().strip_loc()
+        self.assertEqual(len(result.entries), 3)
+        self.assertIsInstance(result.entries[0], JournalEntry)
+        self.assertIsNotNone(result.entries[0].commodity_directive)
+        self.assertEqual(
+            result.entries[0].commodity_directive,
+            CommodityDirective(commodity=Commodity(name="USD"), comment=None),
+        )
+        self.assertIsInstance(result.entries[1], JournalEntry)
+        self.assertIsNotNone(result.entries[1].transaction)
+        self.assertIsInstance(result.entries[2], JournalEntry)
+        self.assertIsNotNone(result.entries[2].include)
+        self.assertEqual(result.entries[2].include, Include(filename="other.journal"))
+
+    def test_parse_account_directive(self):
+        journal_content = """
+account assets:checking
+account expenses:food ; Lunch
+"""
+        journal = HledgerParsers.journal.parse(journal_content).unwrap().strip_loc()
+        self.assertEqual(len(journal.entries), 2)
+
+        entry1 = journal.entries[0]
+        self.assertIsInstance(entry1, JournalEntry)
+        self.assertIsNotNone(entry1.account_directive)
+        self.assertEqual(entry1.account_directive.name.parts, ["assets", "checking"])
+        self.assertIsNone(entry1.account_directive.comment)
+
+        entry2 = journal.entries[1]
+        self.assertIsInstance(entry2, JournalEntry)
+        self.assertIsNotNone(entry2.account_directive)
+        self.assertEqual(entry2.account_directive.name.parts, ["expenses", "food"])
+        self.assertEqual(entry2.account_directive.comment, "Lunch")
+
+    def test_parse_alias_directive(self):
+        journal_content = """
+alias assets:broker:schwab* = assets:broker:schwab
+"""
+        journal = HledgerParsers.journal.parse(journal_content).unwrap().strip_loc()
+        self.assertEqual(len(journal.entries), 1)
+
+        entry = journal.entries[0]
+        self.assertIsInstance(entry, JournalEntry)
+        self.assertIsNotNone(entry.alias)
+        self.assertEqual(entry.alias.pattern, "assets:broker:schwab*")
+        self.assertEqual(entry.alias.target_account.parts, ["assets", "broker", "schwab"])
+
+    def test_price_directive_parser_no_time(self):
+        directive_text = "P 2013-12-02 USD 3.0965 PLN"
+        result = HledgerParsers.price_directive.parse(directive_text).unwrap()
+        self.assertEqual(
+            result.strip_loc(),
+            MarketPrice(
+                date=date_class(2013, 12, 2),
+                time=None,
+                commodity=Commodity(name="USD"),
+                unit_price=Amount(quantity=Decimal("3.0965"), commodity=Commodity(name="PLN")),
+                comment=None,
+            ),
+        )
+        self.assertIsNotNone(result.source_location)
+        self.assertEqual(result.source_location.offset, 0)
+        self.assertEqual(result.source_location.length, len(directive_text))
+        self.assertEqual(result.source_location.filename, "")
+
+    def test_price_directive_parser_with_time(self):
+        directive_text = "P 2004-06-21 02:18:02 AAPL 32.91 USD"
+        result = HledgerParsers.price_directive.parse(directive_text).unwrap()
+        self.assertEqual(
+            result.strip_loc(),
+            MarketPrice(
+                date=date_class(2004, 6, 21),
+                time=time_class(2, 18, 2),
+                commodity=Commodity(name="AAPL"),
+                unit_price=Amount(quantity=Decimal("32.91"), commodity=Commodity(name="USD")),
+                comment=None,
+            ),
+        )
+        self.assertIsNotNone(result.source_location)
+        self.assertEqual(result.source_location.offset, 0)
+        self.assertEqual(result.source_location.length, len(directive_text))
+        self.assertEqual(result.source_location.filename, "")
+
+    def test_price_directive_parser_with_comment(self):
+        directive_text = "P 2022-01-01 $ 2 C ; estimate"
+        result = HledgerParsers.price_directive.parse(directive_text).unwrap()
+        self.assertEqual(
+            result.strip_loc(),
+            MarketPrice(
+                date=date_class(2022, 1, 1),
+                time=None,
+                commodity=Commodity(name="$"),
+                unit_price=Amount(quantity=Decimal("2"), commodity=Commodity(name="C")),
+                comment="estimate",
+            ),
+        )
+
+    def test_journal_with_price_directive(self):
+        journal_text = """
+P 2013-12-02 USD 3.0965 PLN
+
+2024-01-01 * Transaction One
+    assets:account1    100 USD
+    expenses:category   -100 USD
+"""
+        result = HledgerParsers.journal.parse(journal_text).unwrap().strip_loc()
+        self.assertEqual(len(result.entries), 2)
+        self.assertIsInstance(result.entries[0], JournalEntry)
+        self.assertIsNotNone(result.entries[0].market_price)
+        self.assertEqual(
+            result.entries[0].market_price,
+            MarketPrice(
+                date=date_class(2013, 12, 2),
+                time=None,
+                commodity=Commodity(name="USD"),
+                unit_price=Amount(quantity=Decimal("3.0965"), commodity=Commodity(name="PLN")),
+                comment=None,
+            ),
+        )
+        self.assertIsInstance(result.entries[1], JournalEntry)
+        self.assertIsNotNone(result.entries[1].transaction)
 
 
 if __name__ == "__main__":
