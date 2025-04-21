@@ -1,3 +1,5 @@
+import click
+import pprint
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -341,31 +343,32 @@ def parse_hledger_journal(filename: str):
     return parse_hledger_journal_content(file_content, full_filename)
 
 
-if __name__ == "__main__":
-    file_path = "examples/all.txt"
+# Define the main click group
+@click.group()
+def cli():
+    """A command-line tool for parsing hledger journal files."""
+    pass
+
+# Define the pprint command
+@cli.command("pprint") # Explicitly name the command
+@click.argument('filename', type=click.Path(exists=True, dir_okay=False, path_type=Path)) # Use Path object
+def pprint_cmd(filename: Path):
+    """Parses the journal file and pretty-prints the result."""
     try:
-        with open(file_path, "r") as f:
-            journal_content = f.read()
-
-        parsed_data = parse_hledger_journal(journal_content, file_path)
-        print("Successfully parsed hledger journal:")
-        print(f"Parsed {len(parsed_data)} top-level entries.")
-        if parsed_data:
-            print("\nFirst few parsed entries:")
-            for entry in parsed_data[:5]:  # Print first 5 entries
-                print(f"- Type: {type(entry).__name__}, Content: {entry}")
-                if isinstance(entry, Transaction):
-                    print(f"  Source location: {entry.source_location}")
-                    if entry.postings:
-                        print(
-                            f"  First posting source location: {entry.postings[0].source_location}"
-                        )
-                elif isinstance(entry, Balance):
-                    print(f"  Source location: {entry.source_location}")
-
-    except FileNotFoundError:
-        print(f"Error: File not found at {file_path}")
+        # Pass the absolute path string to the parser function
+        parsed_data = parse_hledger_journal(str(filename.absolute()))
+        print(f"Successfully parsed hledger journal: {filename}")
+        # Use pprint.pformat for better control if needed, or just pprint
+        pprint.pprint(parsed_data, indent=2) # Add indentation for readability
     except ParseError as e:
-        print(f"Parsing failed: {e}")
+        # Improve error reporting
+        print(f"Parsing failed in '{filename}': {e}")
+        # Consider showing the problematic line/context if possible from Parsita error
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        print(f"An unexpected error occurred while processing '{filename}': {e}")
+        # Consider adding traceback for debugging unexpected errors
+        # import traceback
+        # traceback.print_exc()
+
+if __name__ == "__main__":
+    cli()
