@@ -19,6 +19,23 @@ This project provides a Python library for parsing [hledger](https://hledger.org
 
 ## Setup
 
+### Using devenv (Recommended)
+
+This project also supports [devenv](https://devenv.sh/) for managing the development environment using Nix. This provides a more reproducible setup.
+
+1.  **Install Nix and devenv:**
+    Follow the instructions on the [official devenv installation guide](https://devenv.sh/getting-started/) to install Nix and devenv on your system.
+
+2.  **Activate the development environment:**
+    Navigate to the project root directory in your terminal and run:
+    ```bash
+    devenv shell
+    ```
+    This command will build the environment defined in `devenv.nix` (if not already built) and drop you into a shell with the correct Python version and all dependencies installed and ready to use. You don't need 
+    to manually create or activate a virtual environment when using devenv.
+
+### Using `uv`
+
 This project uses `uv` for environment and package management.
 
 1.  **Install `uv`:**
