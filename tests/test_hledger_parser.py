@@ -62,6 +62,26 @@ class TestHledgerParsers(unittest.TestCase):
         result_negative = HledgerParsers.amount_value.parse("-171.00")
         self.assertEqual(result_negative.unwrap(), Decimal("-171.00"))
 
+    def test_cost(self):
+        result = HledgerParsers.cost.parse("@ 1 USD").unwrap()
+        self.assertEqual(
+            result.strip_loc(),
+            Cost(
+                kind=CostKind.UnitCost,
+                amount=Amount(quantity=Decimal("1"), commodity=Commodity("USD")),
+            ),
+        )
+
+    def test_cost_long(self):
+        result = HledgerParsers.cost.parse("@ 19,881.00134 PseudoUSD").unwrap()
+        self.assertEqual(
+            result.strip_loc(),
+            Cost(
+                kind=CostKind.UnitCost,
+                amount=Amount(quantity=Decimal("19881.00134"), commodity=Commodity("PseudoUSD")),
+            ),
+        )
+
     def test_currency_parser(self):
         result = HledgerParsers.currency.parse("USD")
         parsed_currency = result.unwrap()
@@ -69,6 +89,28 @@ class TestHledgerParsers(unittest.TestCase):
         self.assertIsNotNone(parsed_currency.source_location)
         self.assertEqual(parsed_currency.source_location.offset, 0)
         self.assertEqual(parsed_currency.source_location.length, len("USD"))
+        self.assertEqual(parsed_currency.source_location.filename, "")
+
+    def test_currency_parser_quoted(self):
+        result = HledgerParsers.currency.parse('"TSLA260116c200"')
+        parsed_currency = result.unwrap()
+        self.assertEqual(parsed_currency.name, "TSLA260116c200")
+        self.assertIsNotNone(parsed_currency.source_location)
+        self.assertEqual(parsed_currency.source_location.offset, 0)
+        self.assertEqual(
+            parsed_currency.source_location.length, len('"TSLA260116c200"')
+        )
+        self.assertEqual(parsed_currency.source_location.filename, "")
+
+    def test_currency_parser_quoted_with_spaces(self):
+        result = HledgerParsers.currency.parse('"Some Commodity With Spaces"')
+        parsed_currency = result.unwrap()
+        self.assertEqual(parsed_currency.name, "Some Commodity With Spaces")
+        self.assertIsNotNone(parsed_currency.source_location)
+        self.assertEqual(parsed_currency.source_location.offset, 0)
+        self.assertEqual(
+            parsed_currency.source_location.length, len('"Some Commodity With Spaces"')
+        )
         self.assertEqual(parsed_currency.source_location.filename, "")
 
     def test_amount_parser_failure(self):
@@ -202,6 +244,31 @@ class TestHledgerParsers(unittest.TestCase):
         )  # +1 for the newline
         self.assertEqual(result_with_comment.source_location.filename, "")
 
+    def test_posting_looong(self):
+        posting_text_with_comment = (
+            "assets:broker:celsius  -1.517186151241544473 BTC @ 19,881.00134 PseudoUSD"
+        )
+        result_with_comment = HledgerParsers.posting.parse(
+            posting_text_with_comment
+        ).unwrap()
+        self.assertEqual(
+            result_with_comment.strip_loc(),
+            Posting(
+                account=AccountName(parts=["assets", "broker", "celsius"]),
+                amount=Amount(
+                    quantity=Decimal("-1.517186151241544473"),
+                    commodity=Commodity(name="BTC"),
+                ),
+                cost=Cost(
+                    kind=CostKind.UnitCost,
+                    amount=Amount(
+                        quantity=Decimal("19881.00134"),
+                        commodity=Commodity("PseudoUSD"),
+                    ),
+                ),
+            ),
+        )
+
     def test_transaction_parser_failure(self):
         # Missing postings
         transaction_text = "2013-12-03 * Main Account Deposit  USD"
@@ -245,9 +312,7 @@ class TestHledgerParsers(unittest.TestCase):
         self.assertEqual(
             first_posting.source_location.offset, expected_offset_first_posting
         )
-        self.assertEqual(
-            first_posting.source_location.length, len(first_posting_text)
-        )
+        self.assertEqual(first_posting.source_location.length, len(first_posting_text))
         self.assertEqual(first_posting.source_location.filename, "")
 
         # Check source location for the second posting
@@ -273,9 +338,7 @@ class TestHledgerParsers(unittest.TestCase):
         self.assertEqual(
             third_posting.source_location.offset, expected_offset_third_posting
         )
-        self.assertEqual(
-            third_posting.source_location.length, len(third_posting_text)
-        )
+        self.assertEqual(third_posting.source_location.length, len(third_posting_text))
         self.assertEqual(third_posting.source_location.filename, "")
 
         # Check source location for the fourth posting
@@ -299,6 +362,14 @@ class TestHledgerParsers(unittest.TestCase):
     equity:transfers            -1,349.20 USD  
     assets:broker:bitstamp         -15.00 USD	
     expenses:broker:bitstamp        15.00 USD    """
+        result = HledgerParsers.transaction.parse(transaction_text)
+        parsed_transaction = result.unwrap()
+
+    def test_transaction_parser_unmarked(self):
+        # Example transaction from examples/all.txt
+        transaction_text = """2013-12-03 test
+    assets:broker:bitstamp       1 USD
+    equity:transfers"""
         result = HledgerParsers.transaction.parse(transaction_text)
         parsed_transaction = result.unwrap()
 
@@ -351,25 +422,32 @@ class TestHledgerParsers(unittest.TestCase):
         self.assertEqual(parsed_transaction.code, "CODE123")
 
     def test_balance_assertion_parser(self):
-        balance_text = "assets:broker:revolut = 0 SOL"
-        result = HledgerParsers.balance_assertion.parse(balance_text)
-        parsed_balance = result.unwrap()
-        self.assertIsInstance(parsed_balance.account, AccountName)
-        self.assertEqual(parsed_balance.account.parts, ["assets", "broker", "revolut"])
+        balance_text = "assets:broker:revolut        =    0 SOL"
+        result = HledgerParsers.posting.parse(balance_text)
+        posting = result.unwrap()
+        self.assertIsInstance(posting.account, AccountName)
+        self.assertEqual(posting.account.parts, ["assets", "broker", "revolut"])
 
-        self.assertIsInstance(parsed_balance.amount, Amount)
-        self.assertEqual(parsed_balance.amount.quantity, Decimal("0"))
-        self.assertEqual(parsed_balance.amount.commodity.name, "SOL")
+        self.assertIsNone(posting.amount)
+        self.assertEqual(posting.balance.strip_loc(), Amount(quantity= Decimal("0"), commodity=Commodity("SOL")))
 
-        self.assertIsNotNone(parsed_balance.source_location)
-        self.assertEqual(parsed_balance.source_location.offset, 0)
-        self.assertEqual(parsed_balance.source_location.length, len(balance_text))
-        self.assertEqual(parsed_balance.source_location.filename, "")
-    
+    def test_pure_balance_assertion_algo(self):
+        balance_text = "= 2557.2145917 ALGO"
+        result = HledgerParsers.balance.parse(balance_text)
+        posting = result.unwrap()
+
+    def test_balance_assertion_algo(self):
+        balance_text = "assets:broker:binance  = 2557.2145917 ALGO"
+        result = HledgerParsers.posting.parse(balance_text)
+        posting = result.unwrap()
+
+    # @unittest.skip("Skip this test, until all other tests are successful")
     def test_all_journal(self):
+        # Whenever any other tests, skip this one with @unittest.skip annotation
         example_journal_fn = "examples/all.txt"
         result = HledgerParsers.journal.parse(Path(example_journal_fn).read_text())
         parsed_journal = result.unwrap()
 
+
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(failfast=True)

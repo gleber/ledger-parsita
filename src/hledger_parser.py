@@ -14,7 +14,6 @@ from .classes import (
     CostKind,  # Import CostKind
     Tag,
     Status,
-    Balance,
     MarketPrice,
     AccountDirective,
     File,
@@ -84,6 +83,13 @@ def listify(x):
         return x
     return [x]
 
+def oneify(x, default=None):
+    if not isinstance(x, Sequence):
+        raise Exception("BAD VALUE")
+    if x:
+        return x[0]
+    return default
+
 
 # Can't use whitespace since ledger language requires indentation
 class HledgerParsers(ParserContext, whitespace=None):
@@ -103,26 +109,27 @@ class HledgerParsers(ParserContext, whitespace=None):
         lambda parts: date_class(*parts)
     )
 
-    status = opt(lit("*", "!")) > (lambda s: Status(s[0]) if s else Status.Unmarked)    
+    status = opt(lit("*", "!")) > (lambda s: Status(s[0]) if s else Status.Unmarked)
     payee = reg(r"[^\n]*")
 
-    # Account names can contain colons
+    # Account names can contain colons, underscores, periods, and hyphens
     # Transform account name string into AccountName object
     account_name = positioned(
-        reg(r"[a-zA-Z0-9:_\.]+") > (lambda name: AccountName(parts=name.split(":"))),
+        reg(r"[a-zA-Z0-9:_\.\-]+") > (lambda name: AccountName(parts=name.split(":"))),
         filename="",
     )  # Filename will be populated later
 
     # Amount can have commas and an optional decimal
     # Transform amount string into Decimal
-    amount_value = reg(r"[-+]?\d{1,3}(?:,\d{3})*(?:\.\d+)?") > (
+    amount_value = reg(r"[-+]?[\d,]*\d(\.\d*)?") > (
         lambda s: Decimal(s.replace(",", ""))
     )
 
-    # Currency is one or more uppercase letters
-    # Transform currency string into Commodity object
+    # Currency can be one or more uppercase letters or anything in double quotes
+    # Transform currency string into Commodity object (removing quotes if present)
     currency = positioned(
-        reg(r"[A-Z]+") > (lambda name: Commodity(name=name)), filename=""
+        reg(r'"[^"]+"|[A-Za-z]+') > (lambda name: Commodity(name=name.strip('"'))),
+        filename="",
     )  # Filename will be populated later
 
     # Amount with optional currency
@@ -136,6 +143,8 @@ class HledgerParsers(ParserContext, whitespace=None):
         ),
         filename="",
     )  # Handle optional currency, Filename will be populated later
+
+    balance = lit('=') >> ws >> amount
 
     # Cost
     cost = positioned(
@@ -151,13 +160,15 @@ class HledgerParsers(ParserContext, whitespace=None):
         account_name
         & opt(ws >> amount)
         & opt(ws >> cost)
+        & opt(ws >> balance)
         & opt(ws >> comment_text) << ows
         > (
             lambda parts: Posting(
                 account=parts[0],
-                amount=parts[1][0] if parts[1] != [] else None,
-                cost=parts[2][0] if parts[2] != [] else None,
-                comment=parts[3][0] if parts[3] != [] else None,
+                amount=oneify(parts[1]),
+                cost=oneify(parts[2]),
+                balance=oneify(parts[3]),
+                comment=oneify(parts[4]),
             )
         ),
         filename="",
@@ -166,18 +177,33 @@ class HledgerParsers(ParserContext, whitespace=None):
     # A transaction starts with a date, status, description, and then postings
     transaction_code = lit("(") >> reg(r"[^)]+") << lit(")")
 
-    transaction_header = date << ws & status & opt(ws >> transaction_code) & ws >> payee << ows << newline
+    transaction_header = (
+        date << ws
+        & opt(status << ws)
+        & opt(transaction_code << ws)
+        & payee << ows << newline
+    )
 
     # A transaction consists of a header followed by zero or more postings. It must contain closing newline
     transaction = positioned(
-        (transaction_header << indent & repsep(posting, newline & indent, min=2))
+        (
+            transaction_header << indent
+            & repsep(posting | comment_text, newline & indent, min=1)
+        )
         > (
             lambda parts: Transaction(
                 date=parts[0][0],
-                status=Status(parts[0][1]),
-                code=parts[0][2][0] if parts[0][2] else None, # Extract the optional code
+                status=oneify(parts[0][1]),
+                code=(
+                    parts[0][2][0] if parts[0][2] else None
+                ),  # Extract the optional code
                 payee=parts[0][3].strip(),
-                postings=parts[1],  # parts[1] is the list of single_posting results
+                postings=[
+                    p for p in parts[1] if isinstance(p, Posting)
+                ],  # Combine first item and repeated items, then filter
+                comments=[
+                    c for c in parts[1] if isinstance(c, str)
+                ],  # Combine first item and repeated items, then capture comments
             )
         ),
         filename="",
@@ -185,10 +211,9 @@ class HledgerParsers(ParserContext, whitespace=None):
 
     # Balance assertion: account name, equals sign, amount
     balance_assertion = positioned(
-        account_name & (ws >> lit("=") >> ws >> amount) > (
-            lambda parts: Balance(account=parts[0], amount=parts[1])
-        ),
-        filename="" # Filename will be populated later
+        account_name & (ws >> lit("=") >> ws >> amount)
+        > (lambda parts: Balance(account=parts[0], amount=parts[1])),
+        filename="",  # Filename will be populated later
     )
 
     tli = transaction | balance_assertion
@@ -213,15 +238,16 @@ if __name__ == "__main__":
         print(f"Parsed {len(parsed_data)} top-level entries.")
         if parsed_data:
             print("\nFirst few parsed entries:")
-            for entry in parsed_data[:5]: # Print first 5 entries
+            for entry in parsed_data[:5]:  # Print first 5 entries
                 print(f"- Type: {type(entry).__name__}, Content: {entry}")
                 if isinstance(entry, Transaction):
                     print(f"  Source location: {entry.source_location}")
                     if entry.postings:
-                        print(f"  First posting source location: {entry.postings[0].source_location}")
+                        print(
+                            f"  First posting source location: {entry.postings[0].source_location}"
+                        )
                 elif isinstance(entry, Balance):
-                     print(f"  Source location: {entry.source_location}")
-
+                    print(f"  Source location: {entry.source_location}")
 
     except FileNotFoundError:
         print(f"Error: File not found at {file_path}")

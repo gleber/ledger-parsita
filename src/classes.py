@@ -136,7 +136,6 @@ class Tag(PositionAware["Tag"]):
         return f"{self.name}"
 
 
-
 @dataclass
 class Posting(PositionAware["Posting"]):
     """A posting in a transaction"""
@@ -144,6 +143,7 @@ class Posting(PositionAware["Posting"]):
     account: 'AccountName'
     amount: Optional['Amount'] = None
     cost: Optional[Cost] = None
+    balance: Optional[Amount] = None
     comment: Optional[str] = None
     status: Optional[str] = None
     date: Optional[date] = None
@@ -168,6 +168,7 @@ class Transaction(PositionAware["Transaction"]):
     date: date
     payee: Union[str, AccountName]
     postings: List[Posting] = field(default_factory=list)
+    comments: List[str] = field(default_factory=list) # Added comments field
     comment: Optional[str] = None
     code: Optional[str] = None
     status: Optional[Status] = None
@@ -264,14 +265,6 @@ class JournalSource(PositionAware["JournalSource"]):
     periodic_txns: List[str] = field(default_factory=list)
     final_comment_lines: Optional[str] = None
     files: List[tuple[str, str]] = field(default_factory=list)
-    source_location: Optional["SourceLocation"] = None
-
-
-@dataclass
-class Balance(PositionAware["Balance"]):
-    """A balance"""
-    account: AccountName
-    amount: Amount
     source_location: Optional["SourceLocation"] = None
 
 
