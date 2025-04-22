@@ -1,9 +1,14 @@
+from dataclasses import replace
+from typing import Optional
 import click
 import pprint
 from pathlib import Path
+from src.filtering import filter_entries
 from src.hledger_parser import parse_hledger_journal
-from src.classes import Journal
+from src.classes import Journal, JournalEntry
 from parsita import ParseError
+
+
 
 # Define the main click group
 @click.group()
@@ -23,18 +28,30 @@ def cli():
 @click.option(
     "-s", "--strip", is_flag=True, help="Strip location information from the output."
 )
-def pprint_cmd(filename: Path, flat: bool, strip: bool):
+@click.option(
+    "-q", "--query", type=str, default=None, help="Filter transactions using a query string."
+)
+def pprint_cmd(filename: Path, flat: bool, strip: bool, query: Optional[str]):
     """Parses the journal file and pretty-prints the result."""
     try:
         # Pass the absolute path string to the parser function
         parsed_data = parse_hledger_journal(str(filename.absolute()))
-        print(f"Successfully parsed hledger journal: {filename}")
+        click.echo(f"Successfully parsed hledger journal: {filename}", err=True)
+
+        # Apply filtering if a query is provided
+        if query:
+            filtered_transactions = filter_entries(parsed_data.entries, query)
+        else:
+            filtered_transactions = parsed_data.entries
+
+        filtered_journal = replace(parsed_data, entries=filtered_transactions)
+
         if flat:
-            parsed_data = parsed_data.flatten()
+            filtered_journal = filtered_journal.flatten()
         if strip:
-            parsed_data = parsed_data.strip_loc()
+            filtered_journal = filtered_journal.strip_loc()
         # Use pprint.pformat for better control if needed, or just pprint
-        pprint.pprint(parsed_data, indent=2)  # Add indentation for readability
+        pprint.pprint(filtered_journal, indent=2)  # Add indentation for readability
     except ParseError as e:
         # Improve error reporting
         print(f"Parsing failed in '{filename}': {e}")
@@ -57,7 +74,10 @@ def pprint_cmd(filename: Path, flat: bool, strip: bool):
 @click.option(
     "-s", "--strip", is_flag=True, help="Strip location information from the output."
 )
-def print_cmd(filename: Path, flat: bool, strip: bool):
+@click.option(
+    "-q", "--query", type=str, default=None, help="Filter transactions using a query string."
+)
+def print_cmd(filename: Path, flat: bool, strip: bool, query: Optional[str]):
     """Parses the journal file and prints the result using to_journal_string."""
     try:
         # Pass the absolute path string to the parser function
@@ -65,10 +85,20 @@ def print_cmd(filename: Path, flat: bool, strip: bool):
         click.echo(f"Successfully parsed hledger journal: {filename}", err=True)
         if flat:
             parsed_data = parsed_data.flatten()
+
+        # Apply filtering if a query is provided
+        if query:
+            filtered_transactions = filter_entries(parsed_data.entries, query)
+        else:
+            filtered_transactions = parsed_data.entries
+
+        # Create a new Journal object with only the filtered transactions for printing
+        filtered_journal = replace(parsed_data, entries=filtered_transactions)
+
         if strip:
-            parsed_data = parsed_data.strip_loc()
+            filtered_journal = filtered_journal.strip_loc()
         # Use to_journal_string to print the data
-        print(parsed_data.to_journal_string())
+        print(filtered_journal.to_journal_string())
     except ParseError as e:
         # Improve error reporting
         print(f"Parsing failed in '{filename}': {e}")

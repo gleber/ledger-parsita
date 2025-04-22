@@ -123,6 +123,7 @@ include journal_b.journal"""
         self.assertEqual(output, expected_output.strip())
 
     def test_cli_print_command_strip(self):
+        self.maxDiff = None
         main_journal_path = TEST_INCLUDES_DIR / "main.journal"
         expected_output = """2023-01-15 Payee Main 1
   Assets:Cash  10.00 $
