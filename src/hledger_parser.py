@@ -16,7 +16,7 @@ from .classes import (
     AccountName,
     Commodity,
     Cost,
-    CostKind,  # Import CostKind
+    CostKind,
     Comment,
     Tag,
     Status,
@@ -24,13 +24,12 @@ from .classes import (
     AccountDirective,
     File,
     JournalEntry,
-    Report,
     Journal,
     SourceLocation,
-    PositionAware,  # Import PositionAware
-    CommodityDirective,  # Import CommodityDirective
-    Alias,  # Import Alias
-    MarketPrice,  # Import MarketPrice
+    PositionAware,
+    CommodityDirective,
+    Alias,
+    MarketPrice,
 )
 
 from abc import abstractmethod
@@ -49,7 +48,7 @@ class PositionedParser(
     ):
         super().__init__()
         self.parser = parser
-        self.filename = filename
+        self.filename = Path(filename)
 
     def _consume(
         self, state: State, reader: Reader[Input]
@@ -206,17 +205,16 @@ class HledgerParsers(ParserContext, whitespace=None):
     # A transaction starts with a date, status, description, and then postings
     transaction_code = lit("(") >> reg(r"[^)]+") << lit(")")
 
-    transaction_header = (
-        date << ws
-        & opt(status << ws)
-        & opt(transaction_code << ws)
-        & payee << ows << newline
-    )
-
     # A transaction consists of a header followed by zero or more postings. It must contain closing newline
     transaction = positioned(
         (
-            transaction_header << indent
+            (
+                date << ws
+                & opt(status << ws)
+                & opt(transaction_code << ws)
+                & payee << ows << newline
+            )
+            << indent
             & repsep(posting | inline_comment, newline & indent, min=1)
         )
         > (
@@ -239,9 +237,11 @@ class HledgerParsers(ParserContext, whitespace=None):
     )  # Filename will be populated later
 
     filename = reg(r"[A-Za-z0-9/\._\-]+")  # Allow digits and hyphens in filenames
+    quoted_filename = lit('"') >> filename << lit('"')
 
     include = positioned(
-        lit("include") >> ws >> filename > (lambda fn: Include(filename=fn)),
+        lit("include") >> ws >> (quoted_filename | filename)
+        > (lambda fn: Include(filename=fn)),
         filename="",
     )
 
@@ -291,25 +291,33 @@ class HledgerParsers(ParserContext, whitespace=None):
         filename="",
     )
 
-    tli = (
-        transaction
-        | include
-        | commodity_directive
-        | account_directive
-        | alias_directive
-        | price_directive
-        | top_comment
-    )  # Add price_directive
+    tli = positioned(
+        (
+            (
+                transaction
+                | include
+                | commodity_directive
+                | account_directive
+                | alias_directive
+                | price_directive
+                | top_comment
+            )
+            > JournalEntry.create
+        ),
+        filename="",
+    )
 
     # The full journal is just a repetition of top-level items (transactions or includes or etc).
     # Each top-level item is separated by one or more whitespace lines.
-    journal = aws >> repsep(tli, rep(ows << newline)) << aws > (
-        lambda items: Journal(
-            # Filter out string comments before creating JournalEntry objects. Skip comments.
-            entries=[
-                JournalEntry.create(i) for i in items if not isinstance(i, Comment)
-            ]
-        )
+    journal = positioned(
+        aws >> repsep(tli, rep(ows << newline)) << aws
+        > (
+            lambda items: Journal(
+                # Filter out string comments before creating JournalEntry objects. Skip comments.
+                entries=items
+            )
+        ),
+        filename="",
     )
 
 
@@ -336,7 +344,7 @@ def parse_hledger_journal_content(file_content, filename=""):
     return recursive_include(journal, filename)
 
 
-def parse_hledger_journal(filename: str):
+def parse_hledger_journal(filename: str) -> Journal:
     path = Path(filename)
     file_content = path.read_text()
     full_filename = path.absolute()
@@ -349,9 +357,12 @@ def cli():
     """A command-line tool for parsing hledger journal files."""
     pass
 
+
 # Define the pprint command
-@cli.command("pprint") # Explicitly name the command
-@click.argument('filename', type=click.Path(exists=True, dir_okay=False, path_type=Path)) # Use Path object
+@cli.command("pprint")  # Explicitly name the command
+@click.argument(
+    "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
+)  # Use Path object
 def pprint_cmd(filename: Path):
     """Parses the journal file and pretty-prints the result."""
     try:
@@ -359,7 +370,7 @@ def pprint_cmd(filename: Path):
         parsed_data = parse_hledger_journal(str(filename.absolute()))
         print(f"Successfully parsed hledger journal: {filename}")
         # Use pprint.pformat for better control if needed, or just pprint
-        pprint.pprint(parsed_data, indent=2) # Add indentation for readability
+        pprint.pprint(parsed_data, indent=2)  # Add indentation for readability
     except ParseError as e:
         # Improve error reporting
         print(f"Parsing failed in '{filename}': {e}")
@@ -369,6 +380,7 @@ def pprint_cmd(filename: Path):
         # Consider adding traceback for debugging unexpected errors
         # import traceback
         # traceback.print_exc()
+
 
 if __name__ == "__main__":
     cli()

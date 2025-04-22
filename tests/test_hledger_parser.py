@@ -97,7 +97,6 @@ class TestHledgerParsers(unittest.TestCase):
         self.assertIsNotNone(parsed_currency.source_location)
         self.assertEqual(parsed_currency.source_location.offset, 0)
         self.assertEqual(parsed_currency.source_location.length, len("USD"))
-        self.assertEqual(parsed_currency.source_location.filename, "")
 
     def test_currency_parser_quoted(self):
         result = HledgerParsers.currency.parse('"TSLA260116c200"')
@@ -108,7 +107,6 @@ class TestHledgerParsers(unittest.TestCase):
         self.assertEqual(
             parsed_currency.source_location.length, len('"TSLA260116c200"')
         )
-        self.assertEqual(parsed_currency.source_location.filename, "")
 
     def test_currency_parser_quoted_with_spaces(self):
         result = HledgerParsers.currency.parse('"Some Commodity With Spaces"')
@@ -119,7 +117,6 @@ class TestHledgerParsers(unittest.TestCase):
         self.assertEqual(
             parsed_currency.source_location.length, len('"Some Commodity With Spaces"')
         )
-        self.assertEqual(parsed_currency.source_location.filename, "")
 
     def test_amount_parser_failure(self):
         result = HledgerParsers.amount.parse("invalid amount")
@@ -194,8 +191,7 @@ class TestHledgerParsers(unittest.TestCase):
         self.assertEqual(parsed_posting.source_location.offset, 0)
         self.assertEqual(
             parsed_posting.source_location.length, len(posting_text)
-        )  # +1 for the newline consumed by posting parser
-        self.assertEqual(parsed_posting.source_location.filename, "")
+        )
 
     def test_posting_with_cost_parser(self):
         # Example posting with price: assets:broker:bitstamp      0.20000000 BTC @ 855 USD
@@ -224,8 +220,7 @@ class TestHledgerParsers(unittest.TestCase):
         self.assertEqual(
             result_with_price.source_location.length,
             len(posting_text_with_price),
-        )  # +1 for the newline
-        self.assertEqual(result_with_price.source_location.filename, "")
+        )
 
     def test_posting_with_comment(self):
         # Example posting with comment: ; equity:conversion -0.20000000 BTC
@@ -249,8 +244,7 @@ class TestHledgerParsers(unittest.TestCase):
         self.assertEqual(
             result_with_comment.source_location.length,
             len(posting_text_with_comment),
-        )  # +1 for the newline
-        self.assertEqual(result_with_comment.source_location.filename, "")
+        )
 
     def test_posting_looong(self):
         posting_text_with_comment = (
@@ -309,7 +303,6 @@ class TestHledgerParsers(unittest.TestCase):
         self.assertEqual(
             parsed_transaction.source_location.length, len(transaction_text)
         )
-        self.assertEqual(parsed_transaction.source_location.filename, "")
 
         # Check source location for the first posting
         first_posting = parsed_transaction.postings[0]
@@ -321,7 +314,6 @@ class TestHledgerParsers(unittest.TestCase):
             first_posting.source_location.offset, expected_offset_first_posting
         )
         self.assertEqual(first_posting.source_location.length, len(first_posting_text))
-        self.assertEqual(first_posting.source_location.filename, "")
 
         # Check source location for the second posting
         second_posting = parsed_transaction.postings[1]
@@ -335,7 +327,6 @@ class TestHledgerParsers(unittest.TestCase):
         self.assertEqual(
             second_posting.source_location.length, len(second_posting_text)
         )
-        self.assertEqual(second_posting.source_location.filename, "")
 
         # Check source location for the third posting
         third_posting = parsed_transaction.postings[2]
@@ -347,7 +338,6 @@ class TestHledgerParsers(unittest.TestCase):
             third_posting.source_location.offset, expected_offset_third_posting
         )
         self.assertEqual(third_posting.source_location.length, len(third_posting_text))
-        self.assertEqual(third_posting.source_location.filename, "")
 
         # Check source location for the fourth posting
         fourth_posting = parsed_transaction.postings[3]
@@ -361,7 +351,6 @@ class TestHledgerParsers(unittest.TestCase):
         self.assertEqual(
             fourth_posting.source_location.length, len(fourth_posting_text)
         )  # Last posting doesn't have a newline consumed by the parser
-        self.assertEqual(fourth_posting.source_location.filename, "")
 
     def test_transaction_parser_whitespaces(self):
         # Example transaction from examples/all.txt
@@ -392,7 +381,7 @@ class TestHledgerParsers(unittest.TestCase):
     def test_empty_journal_parser(self):
         journal_text = ""
         result = HledgerParsers.journal.parse(journal_text)
-        parsed_journal = result.unwrap()
+        parsed_journal = result.unwrap().strip_loc()
         self.assertEqual(parsed_journal, Journal())
 
     def test_journal_parser_one_transactions(self):
@@ -486,7 +475,7 @@ include foo.bar
         self.assertIsNotNone(result.source_location)
         self.assertEqual(result.source_location.offset, 0)
         self.assertEqual(result.source_location.length, len(directive_text))
-        self.assertEqual(result.source_location.filename, "")
+        self.assertEqual(result.source_location.filename, Path(""))
 
     def test_commodity_directive_with_comment(self):
         directive_text = "commodity EUR ; format 1.000,00 EUR"
@@ -500,7 +489,6 @@ include foo.bar
         self.assertIsNotNone(result.source_location)
         self.assertEqual(result.source_location.offset, 0)
         self.assertEqual(result.source_location.length, len(directive_text))
-        self.assertEqual(result.source_location.filename, "")
 
     def test_journal_with_commodity_directive(self):
         journal_text = """
@@ -575,7 +563,6 @@ alias assets:broker:schwab* = assets:broker:schwab
         self.assertIsNotNone(result.source_location)
         self.assertEqual(result.source_location.offset, 0)
         self.assertEqual(result.source_location.length, len(directive_text))
-        self.assertEqual(result.source_location.filename, "")
 
     def test_price_directive_parser_with_time(self):
         directive_text = "P 2004-06-21 02:18:02 AAPL 32.91 USD"
@@ -593,7 +580,6 @@ alias assets:broker:schwab* = assets:broker:schwab
         self.assertIsNotNone(result.source_location)
         self.assertEqual(result.source_location.offset, 0)
         self.assertEqual(result.source_location.length, len(directive_text))
-        self.assertEqual(result.source_location.filename, "")
 
     def test_price_directive_parser_with_comment(self):
         directive_text = "P 2022-01-01 $ 2 C ; estimate"
@@ -633,6 +619,61 @@ P 2013-12-02 USD 3.0965 PLN
         )
         self.assertIsInstance(result.entries[1], JournalEntry)
         self.assertIsNotNone(result.entries[1].transaction)
+
+    def test_journal_and_entities_have_source_location(self):
+        journal_text = """
+2024-01-01 * Simple Transaction
+    assets:checking    100 USD
+    expenses:food       -100 USD
+
+P 2024-01-01 USD 1.0 EUR
+"""
+        journal = HledgerParsers.journal.parse(journal_text).unwrap()
+
+        # Assert journal has source location
+        self.assertIsNotNone(journal.source_location)
+
+        for entry in journal.entries:
+            self.assertIsNotNone(entry.source_location)
+            if entry.transaction:
+                self.assertIsNotNone(entry.transaction.source_location)
+                for posting in entry.transaction.postings:
+                    self.assertIsNotNone(posting.source_location)
+                    self.assertIsNotNone(posting.account.source_location)
+                    if posting.amount:
+                        self.assertIsNotNone(posting.amount.source_location)
+                        self.assertIsNotNone(posting.amount.commodity.source_location)
+                    if posting.cost:
+                        self.assertIsNotNone(posting.cost.source_location)
+                        self.assertIsNotNone(posting.cost.amount.source_location)
+                        self.assertIsNotNone(posting.cost.amount.commodity.source_location)
+                    if posting.balance:
+                        self.assertIsNotNone(posting.balance.source_location)
+                        self.assertIsNotNone(posting.balance.commodity.source_location)
+                    if posting.comment:
+                        self.assertIsNotNone(posting.comment.source_location)
+            if entry.commodity_directive:
+                self.assertIsNotNone(entry.commodity_directive.source_location)
+                self.assertIsNotNone(entry.commodity_directive.commodity.source_location)
+                if entry.commodity_directive.comment:
+                    self.assertIsNotNone(entry.commodity_directive.comment.source_location)
+            if entry.account_directive:
+                self.assertIsNotNone(entry.account_directive.source_location)
+                self.assertIsNotNone(entry.account_directive.name.source_location)
+                if entry.account_directive.comment:
+                    self.assertIsNotNone(entry.account_directive.comment.source_location)
+            if entry.alias:
+                self.assertIsNotNone(entry.alias.source_location)
+                self.assertIsNotNone(entry.alias.target_account.source_location)
+            if entry.market_price:
+                self.assertIsNotNone(entry.market_price.source_location)
+                self.assertIsNotNone(entry.market_price.commodity.source_location)
+                self.assertIsNotNone(entry.market_price.unit_price.source_location)
+                self.assertIsNotNone(entry.market_price.unit_price.commodity.source_location)
+                if entry.market_price.comment:
+                    self.assertIsNotNone(entry.market_price.comment.source_location)
+            if entry.include:
+                self.assertIsNotNone(entry.include.source_location)
 
 
 if __name__ == "__main__":

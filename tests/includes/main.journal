@@ -1,0 +1,11 @@
+2023-01-15 Payee Main 1
+  Assets:Cash  $10.00
+  Income:Job  $-10.00
+
+include "journal_a.journal"
+
+2023-01-20 Payee Main 2
+  Assets:Bank  $5.00
+  Expenses:Utilities  $-5.00
+
+include "journal_b.journal"

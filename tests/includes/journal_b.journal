@@ -1,0 +1,5 @@
+include journal_c.journal
+
+2023-02-01 Payee B
+  Assets:Cash  $2.00
+  Expenses:Rent  $-2.00
