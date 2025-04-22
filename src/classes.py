@@ -1,10 +1,10 @@
 from abc import abstractmethod
 from collections.abc import Iterable
-from dataclasses import dataclass, field, fields, replace  # Import replace
+from dataclasses import dataclass, field, fields, replace
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Self, Union, Dict, Generic, TypeVar
-from datetime import date, datetime  # Ensure datetime is imported
+from datetime import date, datetime
 from decimal import Decimal
 
 Output = TypeVar("Output")
@@ -395,19 +395,26 @@ class JournalEntry(PositionAware["JournalEntry"]):
     source_location: Optional["SourceLocation"] = None
 
     def to_journal_string(self) -> str:
+        r = []
+        if self.source_location:
+            r.append(Comment(comment=f"{self.source_location.filename}:{self.source_location.offset}:{self.source_location.length}").to_journal_string())
         if self.transaction:
-            return self.transaction.to_journal_string()
+            r.append(self.transaction.to_journal_string())
         elif self.include:
-            return self.include.to_journal_string()
+            r.append(self.include.to_journal_string())
         elif self.commodity_directive:
-            return self.commodity_directive.to_journal_string()
+            r.append(self.commodity_directive.to_journal_string())
         elif self.account_directive:
-            return self.account_directive.to_journal_string()
+            r.append(self.account_directive.to_journal_string())
         elif self.alias:
-            return self.alias.to_journal_string()
+            r.append(self.alias.to_journal_string())
         elif self.market_price:
-            return self.market_price.to_journal_string()
-        raise Exception("Unexpected journal entry type")
+            r.append(self.market_price.to_journal_string())
+        elif self.comment:
+            r.append(self.comment.to_journal_string())
+        else:
+            raise Exception("Unexpected journal entry type")
+        return "\n".join(r)
 
     @staticmethod
     def create(
@@ -459,13 +466,22 @@ class Journal(PositionAware["Journal"]):
                 flattened_entries.append(
                     JournalEntry(
                         comment=Comment(
-                            comment=entry.include.to_journal_string(),
+                            comment=f"begin {entry.include.to_journal_string()}",
                             source_location=entry.include.source_location,
                         ),
                         source_location=entry.include.source_location,
                     )
                 )
                 flattened_entries.extend(entry.include.journal.flatten().entries)
+                flattened_entries.append(
+                    JournalEntry(
+                        comment=Comment(
+                            comment=f"end {entry.include.to_journal_string()}",
+                            source_location=entry.include.source_location,
+                        ),
+                        source_location=entry.include.source_location,
+                    )
+                )
             else:
                 # Add non-include entries or includes without a journal directly
                 flattened_entries.append(entry)

@@ -349,38 +349,3 @@ def parse_hledger_journal(filename: str) -> Journal:
     file_content = path.read_text()
     full_filename = path.absolute()
     return parse_hledger_journal_content(file_content, full_filename)
-
-
-# Define the main click group
-@click.group()
-def cli():
-    """A command-line tool for parsing hledger journal files."""
-    pass
-
-
-# Define the pprint command
-@cli.command("pprint")  # Explicitly name the command
-@click.argument(
-    "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
-)  # Use Path object
-def pprint_cmd(filename: Path):
-    """Parses the journal file and pretty-prints the result."""
-    try:
-        # Pass the absolute path string to the parser function
-        parsed_data = parse_hledger_journal(str(filename.absolute()))
-        print(f"Successfully parsed hledger journal: {filename}")
-        # Use pprint.pformat for better control if needed, or just pprint
-        pprint.pprint(parsed_data, indent=2)  # Add indentation for readability
-    except ParseError as e:
-        # Improve error reporting
-        print(f"Parsing failed in '{filename}': {e}")
-        # Consider showing the problematic line/context if possible from Parsita error
-    except Exception as e:
-        print(f"An unexpected error occurred while processing '{filename}': {e}")
-        # Consider adding traceback for debugging unexpected errors
-        # import traceback
-        # traceback.print_exc()
-
-
-if __name__ == "__main__":
-    cli()
