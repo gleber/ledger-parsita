@@ -21,4 +21,8 @@
     echo "Entered ledger-parsita devenv environment."
     echo "Python version: $(python --version)"
   '';
+
+  enterTest = ''
+    python3 -m unittest discover -s tests
+  '';
 }
