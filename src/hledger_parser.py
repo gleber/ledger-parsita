@@ -36,7 +36,7 @@ from .classes import (
 from abc import abstractmethod
 from typing import Generic, Optional, TypeVar
 from parsita.state import Continue, Input, Output, State
-from parsita import Parser, Reader  # Import necessary classes
+from parsita import Parser, Reader
 
 Output_positioned = TypeVar("Output_positioned")
 
@@ -180,7 +180,7 @@ class HledgerParsers(ParserContext, whitespace=None):
         filename="",
     )  # Filename will be populated later
 
-    comment_text = lit(";") >> ows >> reg(r"[^\n]*")
+    inline_comment = lit(";") >> ows >> reg(r"[^\n]*") > Comment
 
     top_comment = ows >> lit(";", "#") >> ows >> reg(r"[^\n]*") > Comment
 
@@ -190,7 +190,7 @@ class HledgerParsers(ParserContext, whitespace=None):
         & opt(ws >> amount)
         & opt(ws >> cost)
         & opt(ws >> balance)
-        & opt(ws >> comment_text) << ows
+        & opt(ws >> inline_comment) << ows
         > (
             lambda parts: Posting(
                 account=parts[0],
@@ -217,7 +217,7 @@ class HledgerParsers(ParserContext, whitespace=None):
     transaction = positioned(
         (
             transaction_header << indent
-            & repsep(posting | comment_text, newline & indent, min=1)
+            & repsep(posting | inline_comment, newline & indent, min=1)
         )
         > (
             lambda parts: Transaction(
@@ -248,7 +248,7 @@ class HledgerParsers(ParserContext, whitespace=None):
     commodity_directive = positioned(
         lit("commodity") >> opt(ws >> amount_value)
         & ws >> currency
-        & opt(ws >> comment_text)
+        & opt(ws >> inline_comment)
         > (
             lambda parts: CommodityDirective(
                 commodity=parts[1],
@@ -260,7 +260,7 @@ class HledgerParsers(ParserContext, whitespace=None):
     )
 
     account_directive = positioned(
-        lit("account") >> ws >> account_name & opt(ws >> comment_text)
+        lit("account") >> ws >> account_name & opt(ws >> inline_comment)
         > (lambda parts: AccountDirective(name=parts[0], comment=oneify(parts[1]))),
         filename="",
     )
@@ -278,7 +278,7 @@ class HledgerParsers(ParserContext, whitespace=None):
         & opt(ws >> time)
         & ws >> currency
         & ws >> amount
-        & opt(ws >> comment_text)
+        & opt(ws >> inline_comment)
         > (
             lambda parts: MarketPrice(
                 date=parts[0],

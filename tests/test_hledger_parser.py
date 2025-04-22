@@ -25,7 +25,8 @@ from src.classes import (
     Tag,
     Posting,
     Transaction,
-    MarketPrice, # Import MarketPrice
+    MarketPrice,
+    Comment, # Import Comment
 )
 
 
@@ -239,7 +240,7 @@ class TestHledgerParsers(unittest.TestCase):
                 amount=Amount(
                     quantity=Decimal("-0.20000000"), commodity=Commodity(name="BTC")
                 ),
-                comment="comment",
+                comment=Comment(comment="comment"),
             ),
         )
 
@@ -493,7 +494,7 @@ include foo.bar
         self.assertEqual(
             result.strip_loc(),
             CommodityDirective(
-                commodity=Commodity(name="EUR"), comment="format 1.000,00 EUR"
+                commodity=Commodity(name="EUR"), comment=Comment(comment="format 1.000,00 EUR")
             ),
         )
         self.assertIsNotNone(result.source_location)
@@ -543,7 +544,7 @@ account expenses:food ; Lunch
         self.assertIsInstance(entry2, JournalEntry)
         self.assertIsNotNone(entry2.account_directive)
         self.assertEqual(entry2.account_directive.name.parts, ["expenses", "food"])
-        self.assertEqual(entry2.account_directive.comment, "Lunch")
+        self.assertEqual(entry2.account_directive.comment, Comment(comment="Lunch"))
 
     def test_parse_alias_directive(self):
         journal_content = """
@@ -604,7 +605,7 @@ alias assets:broker:schwab* = assets:broker:schwab
                 time=None,
                 commodity=Commodity(name="$"),
                 unit_price=Amount(quantity=Decimal("2"), commodity=Commodity(name="C")),
-                comment="estimate",
+                comment=Comment(comment="estimate"),
             ),
         )
 
