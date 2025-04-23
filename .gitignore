@@ -3,3 +3,4 @@ examples/all.txt
 __pycache__
 examples/taxes
 .devenv
+.devenv.*

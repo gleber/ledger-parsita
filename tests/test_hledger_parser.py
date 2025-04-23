@@ -457,7 +457,7 @@ include foo.bar
         self.assertIsNotNone(parsed_journal.entries[0].include)
         self.assertEqual(parsed_journal.entries[0].include, Include(filename="foo.bar"))
 
-    # @unittest.skip("Skip this test, until all other tests are successful")
+    @unittest.skipIf(not Path("examples/taxes/all/journal").exists, "personal data")
     def test_recursive_journal(self):
         result = parse_hledger_journal("examples/taxes/all.journal").strip_loc()
         self.assertEqual(len(result.entries), 13)
