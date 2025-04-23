@@ -2,154 +2,144 @@
 
 from typing import List, Optional, Union
 
-from parsita import *
-from src.classes import JournalEntry, Transaction, Posting, Amount, AccountName
+from parsita import lit, rep, reg, repsep, ParserContext, opt, ParseError
+
+from src.classes import JournalEntry, Transaction, Posting, Amount, AccountName, BaseFilter
 from datetime import date, datetime
 from decimal import Decimal
 import re
 from dataclasses import dataclass
+from returns.result import Result, safe, Success, Failure
 
 
 # Define filter condition classes
 @dataclass
-class AccountFilter:
-    pattern: str
+class AccountFilter(BaseFilter):
+    pattern: List[str]
+
+    def is_matching(self, transaction: Transaction) -> bool:
+        """Checks if any posting in the transaction has an account matching the pattern."""
+        account_pattern = ":".join(self.pattern)
+        for posting in transaction.postings:
+            if re.search(account_pattern, str(posting.account), re.IGNORECASE):
+                return True
+        return False
 
 
 @dataclass
-class DateFilter:
+class DateFilter(BaseFilter):
     start_date: Optional[date]
     end_date: Optional[date]
 
+    def is_matching(self, transaction: Transaction) -> bool:
+        """Checks if the transaction date falls within the specified date filter."""
+        if self.start_date and self.end_date:
+            return self.start_date <= transaction.date <= self.end_date
+        elif self.start_date:
+            return self.start_date <= transaction.date
+        elif self.end_date:
+            return transaction.date <= self.end_date
+        else:
+            return False  # Should not happen with proper parsing
+
 
 @dataclass
-class DescriptionFilter:
+class DescriptionFilter(BaseFilter):
     text: str
 
+    def is_matching(self, transaction: Transaction) -> bool:
+        """Checks if the transaction payee contains the specified text (case-insensitive)."""
+        if isinstance(transaction.payee, str):
+            return self.text.lower() in transaction.payee.lower()
+        elif isinstance(transaction.payee, AccountName):
+            return self.text.lower() in str(transaction.payee).lower()
+        return False
+
 
 @dataclass
-class AmountFilter:
+class AmountFilter(BaseFilter):
     operator: str
     value: Decimal
 
+    def is_matching(self, transaction: Transaction) -> bool:
+        """Checks if any posting amount in the transaction matches the amount filter."""
+        for posting in transaction.postings:
+            if posting.amount:
+                amount_value = posting.amount.quantity
+                if self.operator == ">" and amount_value > self.value:
+                    return True
+                elif self.operator == "<" and amount_value < self.value:
+                    return True
+                elif self.operator == ">=" and amount_value >= self.value:
+                    return True
+                elif self.operator == "<=" and amount_value <= self.value:
+                    return True
+                elif self.operator == "==" and amount_value == self.value:
+                    return True
+                elif self.operator == "!=" and amount_value != self.value:
+                    return True
+        return False
+
 
 @dataclass
-class TagFilter:
+class TagFilter(BaseFilter):
     name: str
     value: Optional[str]
 
-
-# Define filter functions for different criteria
-def filter_by_account(transaction: Transaction, condition: AccountFilter) -> bool:
-    """Checks if any posting in the transaction has an account matching the pattern."""
-    for posting in transaction.postings:
-        if re.search(condition.pattern, str(posting.account), re.IGNORECASE):
-            return True
-    return False
-
-
-def filter_by_date(transaction: Transaction, condition: DateFilter) -> bool:
-    """Checks if the transaction date falls within the specified date filter."""
-    if condition.start_date and condition.end_date:
-        return condition.start_date <= transaction.date <= condition.end_date
-    elif condition.start_date:
-        return condition.start_date <= transaction.date
-    elif condition.end_date:
-        return transaction.date <= condition.end_date
-    else:
-        return False  # Should not happen with proper parsing
+    def is_matching(self, transaction: Transaction) -> bool:
+        """Checks if any posting in the transaction has a tag matching the tag filter."""
+        print(f"Filtering with: name={self.name}, value={self.value}")
+        for posting in transaction.postings:
+            for tag in posting.tags:
+                print(f"  Checking tag: name={tag.name}, value={tag.value}")
+                if tag.name == self.name:
+                    if self.value is None or tag.value == self.value:
+                        print("    Match found!")
+                        return True
+        print("  No match found.")
+        return False
 
 
-def filter_by_description(
-    transaction: Transaction, condition: DescriptionFilter
-) -> bool:
-    """Checks if the transaction payee contains the specified text (case-insensitive)."""
-    if isinstance(transaction.payee, str):
-        return condition.text.lower() in transaction.payee.lower()
-    elif isinstance(transaction.payee, AccountName):
-        return condition.text.lower() in str(transaction.payee).lower()
-    return False
-
-
-def filter_by_amount(transaction: Transaction, condition: AmountFilter) -> bool:
-    """Checks if any posting amount in the transaction matches the amount filter."""
-    for posting in transaction.postings:
-        if posting.amount:
-            amount_value = posting.amount.quantity
-            if condition.operator == ">" and amount_value > condition.value:
-                return True
-            elif condition.operator == "<" and amount_value < condition.value:
-                return True
-            elif condition.operator == ">=" and amount_value >= condition.value:
-                return True
-            elif condition.operator == "<=" and amount_value <= condition.value:
-                return True
-            elif condition.operator == "==" and amount_value == condition.value:
-                return True
-            elif condition.operator == "!=" and amount_value != condition.value:
-                return True
-    return False
-
-
-def filter_by_tag(transaction: Transaction, condition: TagFilter) -> bool:
-    """Checks if any posting in the transaction has a tag matching the tag filter."""
-    for posting in transaction.postings:
-        for tag in posting.tags:
-            if tag.name == condition.name:
-                if condition.value is None or tag.value == condition.value:
-                    return True
-    return False
-
-
-class FilterQueryParsers(ParserContext, whitespace="\s*"):
+class FilterQueryParsers(ParserContext, whitespace=r"\s*"):
     # Basic parsers
-    colon = ":"
-    dot_dot = ".."
+    colon = lit(":")
     number = reg(r"-?\d+(\.\d+)?") > (lambda x: Decimal(x))
-    date_str = reg(r"\d{4}-\d{2}-\d{2}")
+    date_str = reg(r"\d{4}-\d{2}-\d{2}") > (lambda parts: datetime.strptime(parts, '%Y-%m-%d').date())
 
     # Filter value parsers
     account_part = reg(r"[A-Za-z_]+")
     account = repsep(account_part, lit(":"), min=1)
-    date_range = (opt(date_str) << dot_dot & opt(date_str)) > (
-        lambda parts: (parts[0], parts[1])
+
+    date_range = opt(date_str) & lit("..") & opt(date_str) > (
+        lambda parts: (parts[0][0] if parts[0] else None, parts[2][0] if parts[2] else None)
     )
-    single_date = date_str > (lambda d: (d, d))
-    date_value = date_range | single_date
+    single_date = date_str > (lambda d: (d,d))
+
     description_text = reg(r"[^\s]+")
-    amount_operator = reg(r"[<>!=]+")
+    amount_operator = reg(r"(>=|<=|!=|==|>|<)")
     amount_value_part = amount_operator & number
     tag_name = reg(r"[^\s:]+")
-    tag_value = colon & reg(r"[^\s:]+")
-    tag_value_part = tag_name & opt(tag_value)
 
     # Filter parsers
-    account_filter = lit("account") >> colon >> account > (
-        lambda parts: AccountFilter(pattern=parts[0])
+    account_filter = lit("account") >> colon & account > (
+        lambda parts: AccountFilter(pattern=parts[1])
     )
-    date_filter = lit("date") >> colon >> date_value > (
+    date_filter = lit("date") >> colon >> (date_range | single_date) > (
         lambda parts: DateFilter(
-            start_date=(
-                datetime.strptime(parts[1][0], "%Y-%m-%d").date()
-                if parts[1][0]
-                else None
-            ),
-            end_date=(
-                datetime.strptime(parts[1][1], "%Y-%m-%d").date()
-                if parts[1][1]
-                else None
-            ),
+            start_date=parts[0],
+            end_date=parts[1],
         )
     )
     description_filter = lit("desc") >> colon >> description_text > (
         lambda parts: DescriptionFilter(text=parts[1])
     )
     amount_filter = lit("amount") >> colon >> amount_value_part > (
-        lambda parts: AmountFilter(operator=parts[1][0], value=parts[1][1])
+        lambda parts: AmountFilter(operator=parts[0], value=parts[1])
     )
-    tag_filter = lit("tag") >> colon >> tag_value_part > (
+    tag_filter = lit("tag") >> colon >> tag_name & opt(colon >> reg(r"[^\s:]*")) > (
         lambda parts: TagFilter(
-            name=parts[1][0], value=parts[1][1][1] if parts[1][1] else None
+            # parts[0] is tag name and parts[1] is tag value
+            name=parts[0], value=parts[1][0] if parts[1] and parts[1][0] else None
         )
     )
 
@@ -161,43 +151,29 @@ class FilterQueryParsers(ParserContext, whitespace="\s*"):
     # Main query parser (list of filter conditions separated by spaces)
     query_parser = rep(filter_condition, min=1)
 
-def parse_query(query: str):
-    return FilterQueryParsers.query_parser.parse(query)
+def parse_query_safe(query: str) -> Result[List[BaseFilter], ParseError]:
+    return FilterQueryParsers.query_parser.parse(query).map(list)
 
-def filter_entries(entries: List[JournalEntry], query: str) -> List[JournalEntry]:
-    """Filters a list of transactions based on a query string."""
+def parse_query(query: str) -> Result[List[BaseFilter], ParseError]:
+    """Parses a query string into a list of filter conditions using Result for error handling."""
+    return parse_query_safe(query)
+
+
+def matches_query(transaction: Transaction, parsed_conditions: List[BaseFilter]) -> bool:
+    """Checks if a single transaction matches the filter query string."""
+    for condition in parsed_conditions:
+        if not condition.is_matching(transaction):
+            return False
+    return True # All conditions matched
+
+def _apply_filters(entries: List[JournalEntry], filters: List[BaseFilter]) -> List[Transaction]:
+    """Applies the parsed filter conditions to a list of journal entries."""
     filtered_transactions = []
-    try:
-        # Parse the query string
-        parsed_conditions = parse_query(query).unwrap()
-
-        # Apply filters with AND logic
-        for entry in entries:
-            if entry.transaction:
-                transaction = entry.transaction
-                for condition in parsed_conditions:
-                    if isinstance(condition, AccountFilter):
-                        if not filter_by_account(transaction, condition):
-                            break
-                    elif isinstance(condition, DateFilter):
-                        if not filter_by_date(transaction, condition):
-                            break
-                    elif isinstance(condition, DescriptionFilter):
-                        if not filter_by_description(transaction, condition):
-                            break
-                    elif isinstance(condition, AmountFilter):
-                        if not filter_by_amount(transaction, condition):
-                            break
-                    elif isinstance(condition, TagFilter):
-                        if not filter_by_tag(transaction, condition):
-                            break
-                    # Add more filter types here as needed
-
-            filtered_transactions.append(transaction)
-
-    except ParseError as e:
-        print(f"Error parsing filter query: {e}")
-        # Depending on desired behavior, could return empty list or raise error
-        return []
-
+    for entry in entries:
+        if entry.transaction and matches_query(entry.transaction, filters):
+            filtered_transactions.append(entry.transaction)
     return filtered_transactions
+
+def filter_entries(entries: List[JournalEntry], query: str) -> Result[List[Transaction], ParseError]:
+    """Filters a list of transactions based on a query string, returning a Result."""
+    return parse_query(query).map(lambda filters: _apply_filters(entries, filters))

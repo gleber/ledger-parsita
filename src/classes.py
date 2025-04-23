@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from dataclasses import dataclass, field, fields, replace
 from enum import Enum
@@ -8,6 +9,15 @@ from datetime import date, datetime
 from decimal import Decimal
 
 Output = TypeVar("Output")
+
+@dataclass
+class BaseFilter(ABC):
+    """Abstract base class for all filter conditions."""
+
+    @abstractmethod
+    def is_matching(self, transaction: "Transaction") -> bool:
+        """Checks if the transaction matches the filter condition."""
+        pass
 
 
 class PositionAware(Generic[Output]):
@@ -19,8 +29,8 @@ class PositionAware(Generic[Output]):
     the final value.
     """
 
-    def set_position(self, filename: str, start: int, length: int) -> Self:
-        return replace(
+    def set_position(self, filename: Path, start: int, length: int) -> Self:        
+        return replace( # type: ignore
             self,
             source_location=SourceLocation(
                 filename=filename, offset=start, length=length
@@ -206,7 +216,7 @@ class CommodityDirective(PositionAware["CommodityDirective"]):
     """A commodity directive"""
 
     commodity: Commodity
-    example_amount: Amount = None
+    example_amount: Optional[Amount] = None
     comment: Optional[Comment] = None
     source_location: Optional["SourceLocation"] = None
 
