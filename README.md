@@ -34,32 +34,14 @@ This project also supports [devenv](https://devenv.sh/) for managing the develop
     This command will build the environment defined in `devenv.nix` (if not already built) and drop you into a shell with the correct Python version and all dependencies installed and ready to use. You don't need 
     to manually create or activate a virtual environment when using devenv.
 
-### Using `uv`
+3.  **Run tests:**
 
-This project uses `uv` for environment and package management.
-
-1.  **Install `uv`:**
-    If you don't have `uv` installed, follow the instructions on the [official `uv` installation guide](https://github.com/astral-sh/uv#installation).
-
-2.  **Create and activate the virtual environment:**
+    When inside of the devenv shell, run:
+    
     ```bash
-    # Create the virtual environment (usually named .venv)
-    uv venv
-
-    # Activate the virtual environment
-    # On Linux/macOS:
-    source .venv/bin/activate
-    # On Windows (Command Prompt):
-    # .venv\Scripts\activate.bat
-    # On Windows (PowerShell):
-    # .venv\Scripts\Activate.ps1
+    python3 -m pytest
     ```
 
-3.  **Install dependencies:**
-    Once the virtual environment is activated, install the required packages using `uv`:
-    ```bash
-    uv pip install -r requirements.txt
-    ```
 
 ## Usage
 
