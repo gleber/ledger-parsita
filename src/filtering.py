@@ -166,14 +166,14 @@ def matches_query(transaction: Transaction, parsed_conditions: List[BaseFilter])
             return False
     return True # All conditions matched
 
-def _apply_filters(entries: List[JournalEntry], filters: List[BaseFilter]) -> List[Transaction]:
+def _apply_filters(entries: List[JournalEntry], filters: List[BaseFilter]) -> List[JournalEntry]:
     """Applies the parsed filter conditions to a list of journal entries."""
     filtered_transactions = []
     for entry in entries:
         if entry.transaction and matches_query(entry.transaction, filters):
-            filtered_transactions.append(entry.transaction)
+            filtered_transactions.append(entry)
     return filtered_transactions
 
-def filter_entries(entries: List[JournalEntry], query: str) -> Result[List[Transaction], ParseError]:
+def filter_entries(entries: List[JournalEntry], query: str) -> Result[List[JournalEntry], ParseError]:
     """Filters a list of transactions based on a query string, returning a Result."""
     return parse_query(query).map(lambda filters: _apply_filters(entries, filters))

@@ -6,6 +6,7 @@ from src.classes import (
     Posting,
     AccountName,
     Amount,
+    Commodity,
     JournalEntry,
     Journal,
     Tag,
@@ -37,11 +38,11 @@ def sample_entries():
                 postings=[
                     Posting(
                         account=AccountName(["Expenses", "Food"]),
-                        amount=Amount(Decimal("50.00"), "USD"),
+                        amount=Amount(Decimal("50.00"), Commodity("USD")),
                     ),
                     Posting(
                         account=AccountName(["Assets", "Cash"]),
-                        amount=Amount(Decimal("-50.00"), "USD"),
+                        amount=Amount(Decimal("-50.00"), Commodity("USD")),
                     ),
                 ],
             )
@@ -53,11 +54,11 @@ def sample_entries():
                 postings=[
                     Posting(
                         account=AccountName(["Assets", "Bank"]),
-                        amount=Amount(Decimal("1000.00"), "USD"),
+                        amount=Amount(Decimal("1000.00"), Commodity("USD")),
                     ),
                     Posting(
                         account=AccountName(["Income", "Salary"]),
-                        amount=Amount(Decimal("-1000.00"), "USD"),
+                        amount=Amount(Decimal("-1000.00"), Commodity("USD")),
                     ),
                 ],
             )
@@ -69,12 +70,12 @@ def sample_entries():
                 postings=[
                     Posting(
                         account=AccountName(["Expenses", "Food", "Coffee"]),
-                        amount=Amount(Decimal("5.50"), "USD"),
+                        amount=Amount(Decimal("5.50"), Commodity("USD")),
                         tags=[Tag("caffeine", None)],
                     ),
                     Posting(
                         account=AccountName(["Assets", "Cash"]),
-                        amount=Amount(Decimal("-5.50"), "USD"),
+                        amount=Amount(Decimal("-5.50"), Commodity("USD")),
                     ),
                 ],
             )
@@ -86,12 +87,12 @@ def sample_entries():
                 postings=[
                     Posting(
                         account=AccountName(["Expenses", "Books"]),
-                        amount=Amount(Decimal("25.00"), "USD"),
+                        amount=Amount(Decimal("25.00"), Commodity("USD")),
                         tags=[Tag("genre", "fiction")],
                     ),
                     Posting(
                         account=AccountName(["Assets", "Bank"]),
-                        amount=Amount(Decimal("-25.00"), "USD"),
+                        amount=Amount(Decimal("-25.00"), Commodity("USD")),
                     ),
                 ],
             )
@@ -102,55 +103,69 @@ def sample_entries():
 def test_query_filter_account():
     parse_query("account:Expenses:Food").unwrap()
 
-
 def test_filter_by_account(sample_entries):
     filtered = filter_entries(sample_entries, "account:Expenses:Food").unwrap()
     assert len(filtered) == 2
-    assert filtered[0].payee == "Grocery Store"
-    assert filtered[1].payee == "Coffee Shop"
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Grocery Store"
+    assert filtered[1].transaction
+    assert filtered[1].transaction.payee == "Coffee Shop"
 
     filtered = filter_entries(sample_entries, "account:Assets:Bank").unwrap()
     assert len(filtered) == 2
-    assert filtered[0].payee == "Salary"
-    assert filtered[1].payee == "Bookstore"
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Salary"
+    assert filtered[1].transaction
+    assert filtered[1].transaction.payee == "Bookstore"
 
 
 def test_filter_by_date(sample_entries):
     filtered = filter_entries(sample_entries, "date:2023-01-15").unwrap()
     assert len(filtered) == 1
-    assert filtered[0].payee == "Grocery Store"
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Grocery Store"
 
     filtered = filter_entries(sample_entries, "date:2023-01-01..2023-01-31").unwrap()
     assert len(filtered) == 2
-    assert filtered[0].payee == "Grocery Store"
-    assert filtered[1].payee == "Salary"
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Grocery Store"
+    assert filtered[1].transaction
+    assert filtered[1].transaction.payee == "Salary"
 
     filtered = filter_entries(sample_entries, "date:2023-02-01..").unwrap()
     assert len(filtered) == 2
-    assert filtered[0].payee == "Coffee Shop"
-    assert filtered[1].payee == "Bookstore"
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Coffee Shop"
+    assert filtered[1].transaction
+    assert filtered[1].transaction.payee == "Bookstore"
 
     filtered = filter_entries(sample_entries, "date:..2023-01-31").unwrap()
     assert len(filtered) == 2
-    assert filtered[0].payee == "Grocery Store"
-    assert filtered[1].payee == "Salary"
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Grocery Store"
+    assert filtered[1].transaction
+    assert filtered[1].transaction.payee == "Salary"
 
 
 def test_filter_by_description(sample_entries):
     filtered = filter_entries(sample_entries, "desc:Store").unwrap()
     assert len(filtered) == 2
-    assert filtered[0].payee == "Grocery Store"
-    assert filtered[1].payee == "Bookstore"
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Grocery Store"
+    assert filtered[1].transaction
+    assert filtered[1].transaction.payee == "Bookstore"
 
     filtered = filter_entries(sample_entries, "desc:shop").unwrap()
     assert len(filtered) == 1
-    assert filtered[0].payee == "Coffee Shop"
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Coffee Shop"
 
 
 def test_filter_by_amount(sample_entries):
     filtered = filter_entries(sample_entries, "amount:>100").unwrap()
     assert len(filtered) == 1
-    assert filtered[0].payee == "Salary"
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Salary"
 
     filtered = filter_entries(sample_entries, "amount:<0").unwrap()
     assert len(filtered) == 4  # All transactions have a negative posting
@@ -166,11 +181,13 @@ def test_filter_by_tag(sample_entries):
     ]
     filtered = filter_entries(sample_entries, "tag:caffeine:").unwrap()
     assert len(filtered) == 1
-    assert filtered[0].payee == "Coffee Shop"
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Coffee Shop"
 
     filtered = filter_entries(sample_entries, "tag:genre:fiction").unwrap()
     assert len(filtered) == 1
-    assert filtered[0].payee == "Bookstore"
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Bookstore"
 
     filtered = filter_entries(sample_entries, "tag:nonexistent").unwrap()
     assert len(filtered) == 0
@@ -181,11 +198,13 @@ def test_combined_filters(sample_entries):
         sample_entries, "account:Expenses date:2023-01-01..2023-01-31"
     ).unwrap()
     assert len(filtered) == 1
-    assert filtered[0].payee == "Grocery Store"
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Grocery Store"
 
     filtered = filter_entries(sample_entries, "desc:Shop amount:<=10").unwrap()
     assert len(filtered) == 1
-    assert filtered[0].payee == "Coffee Shop"
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Coffee Shop"
 
 
 def test_invalid_query(sample_entries):
