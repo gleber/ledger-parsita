@@ -7,8 +7,7 @@ from parsita import lit, reg, rep, rep1, repsep, opt, ParserContext, ParseError
 
 from parsita.util import splat
 from datetime import (
-    date as date_class,
-    time as time_class,
+    date as date,
     datetime as datetime_class,
 )  # Import date, time, and datetime
 from decimal import Decimal
@@ -24,7 +23,6 @@ from src.classes import (
     Comment,
     Tag,
     Status,
-    MarketPrice,
     AccountDirective,
     File,
     JournalEntry,
@@ -40,7 +38,12 @@ from abc import abstractmethod
 from typing import Generic, Optional, TypeVar, Union
 from parsita.state import Continue, Input, Output, State
 from parsita import Parser, Reader
-from returns.result import Result, Success, Failure, safe  # Import Result, Success, Failure, safe
+from returns.result import (
+    Result,
+    Success,
+    Failure,
+    safe,
+)  # Import Result, Success, Failure, safe
 from returns.pipeline import flow
 from returns.pointfree import bind
 
@@ -121,21 +124,8 @@ class HledgerParsers(ParserContext, whitespace=None):
     month: Parser[str, int] = reg(r"\d{2}") > int
     day: Parser[str, int] = reg(r"\d{2}") > int
     # Transform date components into a date object
-    date: Parser[str, date_class] = year << lit("-") & month << lit("-") & day > (
-        lambda parts: date_class(*parts)
-    )
-
-    # Time parser (HH:MM:SS or HH:MM)
-    hour: Parser[str, int] = reg(r"\d{2}") > int
-    minute: Parser[str, int] = reg(r"\d{2}") > int
-    second: Parser[str, int] = reg(r"\d{2}") > int
-    time: Parser[str, time_class] = hour << lit(":") & minute & opt(
-        lit(":") >> second
-    ) > (
-        lambda parts: datetime_class.strptime(
-            f"{parts[0]:02}:{parts[1]:02}:{parts[2][0] if parts[2] else 0:02}",
-            "%H:%M:%S",
-        ).time()
+    date_p: Parser[str, date] = year << lit("-") & month << lit("-") & day > (
+        lambda parts: date(*parts)
     )
 
     status: Parser[str, Status] = opt(lit("*", "!")) > (
@@ -222,7 +212,7 @@ class HledgerParsers(ParserContext, whitespace=None):
     transaction: PositionedParser[str, Transaction] = positioned(
         (
             (
-                date << ws
+                date_p << ws
                 & opt(status << ws)
                 & opt(transaction_code << ws)
                 & payee << ows << newline
@@ -255,8 +245,7 @@ class HledgerParsers(ParserContext, whitespace=None):
     quoted_filename: Parser[str, str] = lit('"') >> filename << lit('"')
 
     include: PositionedParser[str, Include] = positioned(
-        lit("include") >> ws >> (quoted_filename | filename)
-        > (lambda fn: Include(filename=fn)),
+        lit("include") >> ws >> (quoted_filename | filename) > Include,
         filename="",
     )
 
@@ -289,7 +278,7 @@ class HledgerParsers(ParserContext, whitespace=None):
 
     # Price directive: P DATE COMMODITY UNITPRICE
     price_directive: PositionedParser[str, MarketPrice] = positioned(
-        lit("P") >> ws >> date
+        lit("P") >> ws >> date_p
         & ws >> currency
         & ws >> amount
         & opt(ws >> inline_comment)
@@ -336,8 +325,10 @@ def recursive_include(journal: Journal, journal_fn: str) -> Result[Journal, str]
             return entry
         include = entry.include
         # Recursively parse included journal and handle the Result
-        included_journal_result = parse_hledger_journal(Path(parent_journal_dir, include.filename))
-        
+        included_journal_result = parse_hledger_journal(
+            Path(parent_journal_dir, include.filename)
+        )
+
         # Use pattern matching to handle the Result
         match included_journal_result:
             case Success(included_journal):
@@ -353,9 +344,14 @@ def recursive_include(journal: Journal, journal_fn: str) -> Result[Journal, str]
     entries = [include_one(i) for i in journal.entries]
     return Success(replace(journal, entries=entries))
 
-def parse_hledger_journal_content(file_content, filename="") -> Result[Journal, ParseError]:
+
+def parse_hledger_journal_content(
+    file_content, filename=""
+) -> Result[Journal, ParseError]:
     # Use map to handle the parsing result instead of unwrap
-    return HledgerParsers.journal.parse(file_content).map(lambda journal: journal.set_filename(filename))
+    return HledgerParsers.journal.parse(file_content).map(
+        lambda journal: journal.set_filename(filename)
+    )
 
 
 @safe
@@ -371,6 +367,10 @@ def parse_hledger_journal(filename: str | Path) -> Result[Journal, Exception]:
     return flow(
         filename,
         read_file_content,
-        bind(lambda file_content: parse_hledger_journal_content(file_content, str(filename))),
-        bind(lambda journal: recursive_include(journal, str(filename)))
+        bind(
+            lambda file_content: parse_hledger_journal_content(
+                file_content, str(filename)
+            )
+        ),
+        bind(lambda journal: recursive_include(journal, str(filename))),
     )

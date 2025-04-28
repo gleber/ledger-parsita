@@ -100,6 +100,10 @@ class SourceLocation:
     offset: int
     length: int
 
+def sl(sl: SourceLocation | None) -> SourceLocation:
+    if sl is None:
+        return SourceLocation(Path(""), 0, 0)
+    return sl
 
 @dataclass
 class Comment:

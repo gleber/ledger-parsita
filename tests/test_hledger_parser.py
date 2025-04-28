@@ -1,6 +1,6 @@
 from pathlib import Path
 import pytest
-from datetime import date as date_class, time as time_class
+from datetime import date as date, time as time_class
 from decimal import Decimal
 
 from parsita import Success, Failure, ParseError
@@ -26,11 +26,11 @@ from src.classes import (
 
 
 def test_date_parser():
-    result = HledgerParsers.date.parse("2013-12-03")
-    assert result.unwrap() == date_class(2013, 12, 3)
+    result = HledgerParsers.date_p.parse("2013-12-03")
+    assert result.unwrap() == date(2013, 12, 3)
 
 def test_date_parser_failure():
-    result = HledgerParsers.date.parse("invalid-date")
+    result = HledgerParsers.date_p.parse("invalid-date")
     assert isinstance(result, Failure)
     error_message = str(result.failure())
     assert "Expected" in error_message
@@ -218,7 +218,7 @@ def test_transaction_parser():
     expenses:broker:bitstamp        15.00 USD"""
     result = HledgerParsers.transaction.parse(transaction_text)
     parsed_transaction = result.unwrap()
-    assert parsed_transaction.date == date_class(2013, 12, 3)
+    assert parsed_transaction.date == date(2013, 12, 3)
     assert parsed_transaction.status == Status.Cleared
     assert parsed_transaction.payee == "Main Account Deposit  USD"
     assert len(parsed_transaction.postings) == 4
@@ -438,7 +438,7 @@ def test_price_directive_parser_no_time():
     directive_text = "P 2013-12-02 USD 3.0965 PLN"
     result = HledgerParsers.price_directive.parse(directive_text).unwrap()
     assert result.strip_loc() == MarketPrice(
-        date=date_class(2013, 12, 2),
+        date=date(2013, 12, 2),
         commodity=Commodity(name="USD"),
         unit_price=Amount(quantity=Decimal("3.0965"), commodity=Commodity(name="PLN")),
         comment=None,
@@ -451,7 +451,7 @@ def test_price_directive_parser_with_time():
     directive_text = "P 2004-06-21 02:18:02 AAPL 32.91 USD"
     result = HledgerParsers.price_directive.parse(directive_text).unwrap()
     assert result.strip_loc() == MarketPrice(
-        date=date_class(2004, 6, 21),
+        date=date(2004, 6, 21),
         commodity=Commodity(name="AAPL"),
         unit_price=Amount(quantity=Decimal("32.91"), commodity=Commodity(name="USD")),
         comment=None,
@@ -464,7 +464,7 @@ def test_price_directive_parser_with_comment():
     directive_text = "P 2022-01-01 $ 2 C ; estimate"
     result = HledgerParsers.price_directive.parse(directive_text).unwrap()
     assert result.strip_loc() == MarketPrice(
-        date=date_class(2022, 1, 1),
+        date=date(2022, 1, 1),
         commodity=Commodity(name="$"),
         unit_price=Amount(quantity=Decimal("2"), commodity=Commodity(name="C")),
         comment=Comment(comment="estimate"),
@@ -483,7 +483,7 @@ P 2013-12-02 USD 3.0965 PLN
     assert isinstance(result.entries[0], JournalEntry)
     assert result.entries[0].market_price is not None
     assert result.entries[0].market_price == MarketPrice(
-        date=date_class(2013, 12, 2),
+        date=date(2013, 12, 2),
         commodity=Commodity(name="USD"),
         unit_price=Amount(quantity=Decimal("3.0965"), commodity=Commodity(name="PLN")),
         comment=None,

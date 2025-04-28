@@ -8,8 +8,10 @@ from src.hledger_parser import parse_hledger_journal
 from src.classes import Journal, JournalEntry
 import re
 from parsita import ParseError
-from src.classes import Posting, Transaction
+from src.classes import Posting, Transaction, sl
 from returns.result import Result, Success, Failure # Add import at the beginning
+from returns.pipeline import (flow)
+from returns.pointfree import (bind)
 
 
 # Define the main click group
@@ -18,27 +20,23 @@ def cli():
     """A command-line tool for parsing hledger journal files."""
     pass
 
-def parse_filter_strip(parse_result: Result[Journal, Union[ParseError, str]], flat: bool, strip: bool, query: Optional[str]) -> Result[Journal, Union[ParseError, str, ValueError]]:
-    # Handle the initial parsing result
-    if isinstance(parse_result, Failure):
-        return parse_result # Propagate the parsing failure
-
-    parsed_data: Journal = parse_result.unwrap() # Unwrap the Success result
-
-    click.echo(f"Successfully parsed hledger journal: {parsed_data.source_location.filename}", err=True)
+def parse_filter_strip(journal: Journal, flat: bool, strip: bool, query: Optional[str]) -> Result[Journal, Union[ParseError, str, ValueError]]:
+    click.echo(f"Successfully parsed hledger journal: {sl(journal.source_location).filename}", err=True)
 
     filtered_entries = []
 
     # Apply filtering if a query is provided
     if query:
-        filter_result = filter_entries(parsed_data.entries, query)
-        if isinstance(filter_result, Failure):
-            return Failure(ValueError(f"Error filtering entries: {filter_result.failure()}")) # Wrap filtering error in ValueError
-        filtered_entries = filter_result.unwrap()
+        filter_result = filter_entries(journal.entries, query)
+        match filter_result:
+            case Failure(error):
+                return Failure(ValueError(f"Error filtering entries: {error}")) # Wrap filtering error in ValueError
+            case Success(entries):
+                filtered_entries = entries
     else:
-        filtered_entries = parsed_data.entries
+        filtered_entries = journal.entries
 
-    filtered_journal = replace(parsed_data, entries=filtered_entries)
+    filtered_journal = replace(journal, entries=filtered_entries)
 
     if flat:
         filtered_journal = filtered_journal.flatten()
@@ -62,16 +60,19 @@ def parse_filter_strip(parse_result: Result[Journal, Union[ParseError, str]], fl
 )
 def pprint_cmd(filename: Path, flat: bool, strip: bool, query: Optional[str]):
     """Parses the journal file and pretty-prints the result."""
-    parse_result = parse_hledger_journal(str(filename.absolute()))
-    process_result = parse_filter_strip(parse_result, flat, strip, query)
+    result: Result[Journal, ValueError] = flow(
+        str(filename.absolute()),
+        parse_hledger_journal,
+        bind(lambda journal: parse_filter_strip(journal, flat, strip, query))
+    )
 
-    if isinstance(process_result, Success):
-        # Use pprint.pformat for better control if needed, or just pprint
-        pprint.pprint(process_result.unwrap(), indent=2)  # Add indentation for readability
-        exit(0)
-    else:
-        print(f"Error: {process_result.failure()}")
-        exit(1)
+    match result:
+        case Success(journal):
+            pprint.pprint(journal, indent=2)
+            exit(0)
+        case Failure(error):
+            print(f"Error: {error}")
+            exit(1)
 
 
 # Define the print command
@@ -91,14 +92,20 @@ def pprint_cmd(filename: Path, flat: bool, strip: bool, query: Optional[str]):
 def print_cmd(filename: Path, flat: bool, strip: bool, query: Optional[str]):
     """Parses the journal file and prints the result using to_journal_string."""
     parse_result = parse_hledger_journal(str(filename.absolute()))
-    process_result = parse_filter_strip(parse_result, flat, strip, query)
 
-    if isinstance(process_result, Success):
-        print(process_result.unwrap().to_journal_string())
-        exit(0)
-    else:
-        print(f"Error: {process_result.failure()}")
-        exit(1)
+    match parse_result:
+        case Success(journal):
+            process_result = parse_filter_strip(journal, flat, strip, query)
+            match process_result:
+                case Success(processed_journal):
+                    print(processed_journal.to_journal_string())
+                    exit(0)
+                case Failure(error):
+                    print(f"Error processing journal: {error}")
+                    exit(1)
+        case Failure(error):
+            print(f"Error parsing journal file: {error}")
+            exit(1)
 
 
 def is_opening_position(posting: Posting) -> bool:
@@ -132,16 +139,17 @@ def find_non_dated_opening_transactions(journal: Journal) -> list[Transaction]:
 )
 def find_non_dated_opens_cmd(filename: Path):
     """Finds transactions opening positions using non-dated subaccounts."""
-    parse_result: Result[Journal, Union[ParseError, str]] = parse_hledger_journal(str(filename.absolute()))
+    parse_result: Result[Journal, Union[ParseError, str, Exception]] = parse_hledger_journal(str(filename.absolute()))
 
-    if isinstance(parse_result, Failure):
-        # Print the error message from the Failure and exit with a non-zero status code
-        print(f"Error parsing journal file: {parse_result.failure()}")
-        exit(1)
-
-    # If parsing was successful, unwrap the result and proceed
-    parsed_data: Journal = parse_result.unwrap()
-    click.echo(f"Successfully parsed hledger journal: {filename}", err=True)
+    match parse_result:
+        case Failure(error):
+            # Print the error message from the Failure and exit with a non-zero status code
+            print(f"Error parsing journal file: {error}")
+            exit(1)
+        case Success(journal):
+            # If parsing was successful, unwrap the result and proceed
+            parsed_data: Journal = journal
+            click.echo(f"Successfully parsed hledger journal: {filename}", err=True)
 
     non_dated_opens = find_non_dated_opening_transactions(parsed_data)
 
