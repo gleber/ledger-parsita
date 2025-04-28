@@ -78,7 +78,7 @@ class PositionAware(Generic[Output]):
         sl = sub_fields["source_location"]
         if isinstance(sl, SourceLocation) and sl is not None:
             sub_fields["source_location"] = replace(
-                sub_fields["source_location"], filename=filename
+                sub_fields["source_location"], filename=filename.resolve()
             )
         # mypy can't handle self well
         return replace(self, **sub_fields) # type: ignore

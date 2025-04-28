@@ -12,7 +12,7 @@ class TestJournalFlattening(unittest.TestCase):
 
     def test_simple_flattening(self):
         main_journal_path = TEST_INCLUDES_DIR / "main.journal"
-        parsed_journal = parse_hledger_journal(str(main_journal_path))
+        parsed_journal = parse_hledger_journal(str(main_journal_path)).unwrap()
         flattened_journal = parsed_journal.flatten()
 
         # Expected number of entries after flattening: 2 from main + 1 from journal_a + 2 from journal_b (1 from b + 1 from c)
@@ -21,43 +21,82 @@ class TestJournalFlattening(unittest.TestCase):
         # self.assertEqual(len(flattened_journal.entries), 8)
 
         # Verify the content of the flattened entries (basic check)
+        self.assertIsNotNone(flattened_journal.entries[0].source_location)
         self.assertEqual(flattened_journal.entries[0].source_location.filename, main_journal_path.absolute())
+        self.assertIsNotNone(flattened_journal.entries[0].transaction)
         self.assertEqual(flattened_journal.entries[0].transaction.payee, "Payee Main 1")
-        self.assertEqual(flattened_journal.entries[1].comment.comment, "begin include journal_a.journal")
+
+        self.assertIsNotNone(flattened_journal.entries[1].source_location)
         self.assertEqual(flattened_journal.entries[1].source_location.filename, main_journal_path.absolute())
+        self.assertIsNotNone(flattened_journal.entries[1].comment)
+        self.assertEqual(flattened_journal.entries[1].comment.comment, "begin include journal_a.journal")
+
+        self.assertIsNotNone(flattened_journal.entries[2].source_location)
         self.assertEqual(flattened_journal.entries[2].source_location.filename, (TEST_INCLUDES_DIR / "journal_a.journal").absolute())
+        self.assertIsNotNone(flattened_journal.entries[2].transaction)
         self.assertEqual(flattened_journal.entries[2].transaction.payee, "Payee A")
+
+        self.assertIsNotNone(flattened_journal.entries[3].source_location)
         self.assertEqual(flattened_journal.entries[3].source_location.filename, main_journal_path.absolute())
+        self.assertIsNotNone(flattened_journal.entries[3].comment)
         self.assertEqual(flattened_journal.entries[3].comment.comment, "end include journal_a.journal")
+
+        self.assertIsNotNone(flattened_journal.entries[4].source_location)
+        self.assertEqual(flattened_journal.entries[4].source_location.filename, main_journal_path.absolute())
+        self.assertIsNotNone(flattened_journal.entries[4].transaction)
         self.assertEqual(flattened_journal.entries[4].transaction.payee, "Payee Main 2")
-        self.assertEqual(flattened_journal.entries[5].comment.comment, "begin include journal_b.journal")
+
+        self.assertIsNotNone(flattened_journal.entries[5].source_location)
         self.assertEqual(flattened_journal.entries[5].source_location.filename, main_journal_path.absolute())
-        self.assertEqual(flattened_journal.entries[6].comment.comment, "begin include journal_c.journal")
+        self.assertIsNotNone(flattened_journal.entries[5].comment)
+        self.assertEqual(flattened_journal.entries[5].comment.comment, "begin include journal_b.journal")
+
+        self.assertIsNotNone(flattened_journal.entries[6].source_location)
         self.assertEqual(flattened_journal.entries[6].source_location.filename, (TEST_INCLUDES_DIR / "journal_b.journal").absolute())
+        self.assertIsNotNone(flattened_journal.entries[6].comment)
+        self.assertEqual(flattened_journal.entries[6].comment.comment, "begin include journal_c.journal")
+
+        self.assertIsNotNone(flattened_journal.entries[7].source_location)
         self.assertEqual(flattened_journal.entries[7].source_location.filename, (TEST_INCLUDES_DIR / "journal_c.journal").absolute())
+        self.assertIsNotNone(flattened_journal.entries[7].transaction)
         self.assertEqual(flattened_journal.entries[7].transaction.payee, "Payee C") # From nested include
+
+        self.assertIsNotNone(flattened_journal.entries[8].source_location)
         self.assertEqual(flattened_journal.entries[8].source_location.filename, (TEST_INCLUDES_DIR / "journal_b.journal").absolute())
+        self.assertIsNotNone(flattened_journal.entries[8].comment)
         self.assertEqual(flattened_journal.entries[8].comment.comment, "end include journal_c.journal")
+
+        self.assertIsNotNone(flattened_journal.entries[9].source_location)
+        self.assertEqual(flattened_journal.entries[9].source_location.filename, (TEST_INCLUDES_DIR / "journal_b.journal").absolute())
+        self.assertIsNotNone(flattened_journal.entries[9].transaction)
         self.assertEqual(flattened_journal.entries[9].transaction.payee, "Payee B") # From nested include
+
+        self.assertIsNotNone(flattened_journal.entries[10].source_location)
+        self.assertEqual(flattened_journal.entries[10].source_location.filename, main_journal_path.absolute())
+        self.assertIsNotNone(flattened_journal.entries[10].comment)
         self.assertEqual(flattened_journal.entries[10].comment.comment, "end include journal_b.journal")
 
     def test_nested_flattening(self):
         journal_b_path = TEST_INCLUDES_DIR / "journal_b.journal"
-        parsed_journal_b = parse_hledger_journal(str(journal_b_path))
+        parsed_journal_b = parse_hledger_journal(str(journal_b_path)).unwrap()
         flattened_journal_b = parsed_journal_b.flatten()
 
         # Expected number of entries after flattening: 1 from journal_b + 1 from journal_c
         self.assertEqual(len(flattened_journal_b.entries), 4)
 
         # Verify the content of the flattened entries
+        self.assertIsNotNone(flattened_journal_b.entries[0].comment)
         self.assertEqual(flattened_journal_b.entries[0].comment.comment, "begin include journal_c.journal")
+        self.assertIsNotNone(flattened_journal_b.entries[1].transaction)
         self.assertEqual(flattened_journal_b.entries[1].transaction.payee, "Payee C")
+        self.assertIsNotNone(flattened_journal_b.entries[2].comment)
         self.assertEqual(flattened_journal_b.entries[2].comment.comment, "end include journal_c.journal")
+        self.assertIsNotNone(flattened_journal_b.entries[3].transaction)
         self.assertEqual(flattened_journal_b.entries[3].transaction.payee, "Payee B")
 
     def test_original_journal_unchanged(self):
         main_journal_path = TEST_INCLUDES_DIR / "main.journal"
-        parsed_journal = parse_hledger_journal(str(main_journal_path))
+        parsed_journal = parse_hledger_journal(str(main_journal_path)).unwrap()
         original_entries_count = len(parsed_journal.entries)
         
         flattened_journal = parsed_journal.flatten()
@@ -65,7 +104,7 @@ class TestJournalFlattening(unittest.TestCase):
         # Verify the original journal's entries list is unchanged
         self.assertEqual(len(parsed_journal.entries), original_entries_count)
         # Verify the original journal still contains Include entries
-        self.assertTrue(any(entry.include for entry in parsed_journal.entries))
+        self.assertTrue(any(entry.include is not None for entry in parsed_journal.entries))
 
 
 if __name__ == '__main__':

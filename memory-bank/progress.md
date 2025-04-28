@@ -8,15 +8,14 @@ This document tracks the progress, completed features, and remaining tasks for l
 - Hledger journal parser is implemented using `parsita` with good test coverage.
 - Data classes for representing parsed journal entries are defined.
 - Filtering logic for account, date, description, amount, and tags is implemented and tested.
+- **All currently implemented tests are passing (including fixes for journal flattening and journal string conversion).**
 
 ## What's Left to Build
 
 - **Implement the capital gains tracking tool, including:**
-    - Data structures for asset lots.
-    - Logic for identifying closed positions and applying FIFO.
-    - Capital gains/loss calculation.
-    - Generation of new journal entries for gains/losses.
-    - Safe in-place journal file update mechanism.
+    - Logic for identifying transactions which open or closed positions.
+    - Logic to find open positions which match closed positions using FIFO ordering.
+    - Safe in-place journal file update mechanism so that dated lot of open and closed positions are the same.
 - Add comprehensive unit tests for the capital gains tracking tool.
 - Integrate the capital gains tracking tool into the CLI.
 - Ensure comprehensive test coverage for all filtering scenarios and edge cases.
@@ -27,6 +26,7 @@ This document tracks the progress, completed features, and remaining tasks for l
 
 - The project's main goal has shifted to implementing the capital gains tracking tool.
 - Initial planning for the capital gains tracking tool is underway, reflected in the updated memory bank files.
+- **All currently implemented tests are passing.**
 
 ## Known Issues
 

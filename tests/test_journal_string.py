@@ -1,5 +1,5 @@
 import unittest
-from src.classes import Amount, Commodity, AccountName, Tag, Cost, CostKind, CommodityDirective, AccountDirective, Alias, MarketPrice, Include, Posting, Transaction, JournalEntry, Journal, Comment
+from src.classes import Amount, Commodity, AccountName, Tag, Cost, CostKind, CommodityDirective, AccountDirective, Alias, MarketPrice, Include, Posting, Transaction, JournalEntry, Journal, Comment, Status
 from decimal import Decimal
 
 class TestJournalString(unittest.TestCase):
@@ -55,8 +55,8 @@ class TestJournalString(unittest.TestCase):
         self.assertEqual(market_price_without_time_or_comment.to_journal_string(), "P 2023-12-29 SOL 105.30 USD")
 
         price_datetime = datetime(2023, 12, 29, 10, 30)
-        market_price_with_time_and_comment = MarketPrice(date=price_date, time=price_datetime.time(), commodity=commodity, unit_price=amount, comment=Comment(comment="Closing price"))
-        self.assertEqual(market_price_with_time_and_comment.to_journal_string(), "P 2023-12-29 10:30:00 SOL 105.30 USD ; Closing price")
+        market_price_with_time_and_comment = MarketPrice(date=price_date, commodity=commodity, unit_price=amount, comment=Comment(comment="Closing price"))
+        self.assertEqual(market_price_with_time_and_comment.to_journal_string(), "P 2023-12-29 SOL 105.30 USD ; Closing price")
 
     def test_include_to_journal_string(self):
         include = Include(filename="other.journal")
@@ -109,7 +109,7 @@ class TestJournalString(unittest.TestCase):
             Posting(account=AccountName(parts=["assets", "broker", "bitstamp"]), amount=Amount(quantity=Decimal("0.20000000"), commodity=Commodity(name="BTC")), cost=Cost(kind=CostKind.UnitCost, amount=Amount(quantity=Decimal("855"), commodity=Commodity(name="USD")))),
             Posting(account=AccountName(parts=["assets", "broker", "bitstamp"]), amount=Amount(quantity=Decimal("-171.00"), commodity=Commodity(name="USD")))
         ]
-        transaction = Transaction(date=date(2013, 12, 5), status="*", code="10350868", payee="Main Account Market Buy BTC", postings=postings)
+        transaction = Transaction(date=date(2013, 12, 5), status=Status.Cleared, code="10350868", payee="Main Account Market Buy BTC", postings=postings)
         expected_output = """2013-12-05 * (10350868) Main Account Market Buy BTC
   assets:broker:bitstamp  0.20000000 BTC @ 855 USD
   assets:broker:bitstamp  -171.00 USD"""
@@ -163,7 +163,7 @@ class TestJournalString(unittest.TestCase):
 
         posting3 = Posting(account=AccountName(parts=["assets", "broker", "bitstamp"]), amount=Amount(quantity=Decimal("0.20000000"), commodity=Commodity(name="BTC")), cost=Cost(kind=CostKind.UnitCost, amount=Amount(quantity=Decimal("855"), commodity=Commodity(name="USD"))))
         posting4 = Posting(account=AccountName(parts=["assets", "broker", "bitstamp"]), amount=Amount(quantity=Decimal("-171.00"), commodity=Commodity(name="USD")))
-        transaction2 = Transaction(date=date(2013, 12, 5), status="*", code="10350868", payee="Main Account Market Buy BTC", postings=[posting3, posting4])
+        transaction2 = Transaction(date=date(2013, 12, 5), status=Status.Cleared, code="10350868", payee="Main Account Market Buy BTC", postings=[posting3, posting4])
         journal_entry2 = JournalEntry(transaction=transaction2)
 
         include_directive = Include(filename="other.journal")

@@ -350,7 +350,7 @@ def parse_hledger_journal_content(
 ) -> Result[Journal, ParseError]:
     # Use map to handle the parsing result instead of unwrap
     return HledgerParsers.journal.parse(file_content).map(
-        lambda journal: journal.set_filename(filename)
+        lambda journal: journal.set_filename(Path(filename))
     )
 
 
