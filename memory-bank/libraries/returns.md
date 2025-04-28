@@ -16,8 +16,11 @@ The `returns` library is used for robust error handling, allowing functions to r
 
 When working with the `Result` class (`Success` and `Failure`), follow these guidelines:
 
-- Prefer using the `.map()` method for transforming the value inside a `Success` instead of using `.unwrap()` or checking the type with `isinstance()`. This promotes a more functional and less error-prone approach.
-- Use structural pattern matching (`match` statement) to determine if a `Result` is a `Success` or `Failure` and to extract the contained value or error.
+- Except for the unit tests:
+  - Prefer using the `.map()` method for transforming the value inside a `Success` instead of using `.unwrap()` or checking the type with `isinstance()`. This promotes a more functional and less      
+    error-prone approach.
+  - Use structural pattern matching (`match` statement) to determine if a `Result` is a `Success` or `Failure` and to extract the contained value or error.
+- In unit tests prefer use of `.unwrap()` and other fail-fast techniques.
 
 ## Context7 MCP Documentation Snippets
 

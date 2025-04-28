@@ -39,10 +39,13 @@ class PositionAware(Generic[Output]):
 
     def strip_loc(self):
         stripped_fields = {
-            field.name: getattr(self, field.name) for field in fields(self)
+            # Mypy can't handle self well
+            field.name: getattr(self, field.name) for field in fields(self)  # type: ignore
         }
 
         def strip_one(v):
+            if v is None:  # Add check for None
+                return None
             if isinstance(v, PositionAware):
                 return v.strip_loc()
             if isinstance(v, Iterable) and not isinstance(v, str):
@@ -52,12 +55,14 @@ class PositionAware(Generic[Output]):
         for k in stripped_fields.keys():
             stripped_fields[k] = strip_one(stripped_fields[k])
         stripped_fields["source_location"] = None
-        return replace(self, **stripped_fields)
+        # mypy can't handle self well
+        return replace(self, **stripped_fields) # type: ignore
 
     def set_filename(self, filename):
         if not isinstance(self, PositionAware):
             return self
-        sub_fields = {field.name: getattr(self, field.name) for field in fields(self)}
+        # mypy can't handle self well
+        sub_fields = {field.name: getattr(self, field.name) for field in fields(self)} # type: ignore
 
         def set_one(v):
             if isinstance(v, PositionAware):
@@ -75,7 +80,8 @@ class PositionAware(Generic[Output]):
             sub_fields["source_location"] = replace(
                 sub_fields["source_location"], filename=filename
             )
-        return replace(self, **sub_fields)
+        # mypy can't handle self well
+        return replace(self, **sub_fields) # type: ignore
 
 
 class CostKind(Enum):
@@ -346,14 +352,11 @@ class MarketPrice(PositionAware["MarketPrice"]):
     unit_price: (
         Amount  # The price per unit (Amount includes quantity and price commodity)
     )
-    time: Optional[datetime] = None  # Optional time component
     comment: Optional[Comment] = None  # Add comment field
     source_location: Optional["SourceLocation"] = None
 
     def to_journal_string(self) -> str:
         s = f"P {self.date.strftime('%Y-%m-%d')}"
-        if self.time:
-            s += f" {self.time.strftime('%H:%M:%S')}"
         s += f" {self.commodity.to_journal_string()} {self.unit_price.to_journal_string()}"
         if self.comment:
             s += f" {self.comment.to_journal_string()}"
@@ -435,8 +438,9 @@ class JournalEntry(PositionAware["JournalEntry"]):
             | AccountDirective
             | Alias
             | MarketPrice
+            | Comment # Add Comment to type hint
         ),
-    ):  # Add MarketPrice to type hint
+    ):
         if isinstance(item, Transaction):
             return JournalEntry(transaction=item)
         if isinstance(item, Include):
@@ -447,7 +451,7 @@ class JournalEntry(PositionAware["JournalEntry"]):
             return JournalEntry(account_directive=item)
         if isinstance(item, Alias):
             return JournalEntry(alias=item)
-        if isinstance(item, MarketPrice):  # Add check for MarketPrice
+        if isinstance(item, MarketPrice):
             return JournalEntry(market_price=item)
         if isinstance(item, Comment):
             return JournalEntry(comment=item)

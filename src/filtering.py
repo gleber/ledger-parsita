@@ -88,15 +88,11 @@ class TagFilter(BaseFilter):
 
     def is_matching(self, transaction: Transaction) -> bool:
         """Checks if any posting in the transaction has a tag matching the tag filter."""
-        print(f"Filtering with: name={self.name}, value={self.value}")
         for posting in transaction.postings:
             for tag in posting.tags:
-                print(f"  Checking tag: name={tag.name}, value={tag.value}")
                 if tag.name == self.name:
                     if self.value is None or tag.value == self.value:
-                        print("    Match found!")
                         return True
-        print("  No match found.")
         return False
 
 

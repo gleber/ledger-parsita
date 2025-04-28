@@ -3,12 +3,16 @@ import pprint
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from parsita import *
+from parsita import lit, reg, rep, rep1, repsep, opt, ParserContext, ParseError
 
 from parsita.util import splat
-from datetime import date as date_class, datetime as datetime_class  # Import datetime
+from datetime import (
+    date as date_class,
+    time as time_class,
+    datetime as datetime_class,
+)  # Import date, time, and datetime
 from decimal import Decimal
-from .classes import (
+from src.classes import (
     Include,
     Transaction,
     Posting,
@@ -33,9 +37,12 @@ from .classes import (
 )
 
 from abc import abstractmethod
-from typing import Generic, Optional, TypeVar
+from typing import Generic, Optional, TypeVar, Union
 from parsita.state import Continue, Input, Output, State
 from parsita import Parser, Reader
+from returns.result import Result, Success, Failure, safe  # Import Result, Success, Failure, safe
+from returns.pipeline import flow
+from returns.pointfree import bind
 
 Output_positioned = TypeVar("Output_positioned")
 
@@ -60,7 +67,7 @@ class PositionedParser(
             end = status.remainder.position
             return Continue(
                 status.remainder,
-                status.value.set_position(self.filename, start, end - start),
+                status.value.set_position(self.filename, start, end - start),  # type: ignore
             )
         else:
             return status
@@ -102,89 +109,95 @@ def oneify(x, default=None):
 
 # Can't use whitespace since ledger language requires indentation
 class HledgerParsers(ParserContext, whitespace=None):
-    newline = reg(r"\r?\n")
-    indent = reg(r"[ \t]+")
-    ws = reg(r"[ \t]+")
-    ows = reg(r"[ \t]*")
-    aws = reg(r"\s*")
-    wsn = ws >> newline
-    owsn = ows >> newline
+    newline: Parser[str, str] = reg(r"\r?\n")
+    indent: Parser[str, str] = reg(r"[ \t]+")
+    ws: Parser[str, str] = reg(r"[ \t]+")
+    ows: Parser[str, str] = reg(r"[ \t]*")
+    aws: Parser[str, str] = reg(r"\s*")
+    wsn: Parser[str, str] = ws >> newline
+    owsn: Parser[str, str] = ows >> newline
 
-    year = reg(r"\d{4}") > int
-    month = reg(r"\d{2}") > int
-    day = reg(r"\d{2}") > int
+    year: Parser[str, int] = reg(r"\d{4}") > int
+    month: Parser[str, int] = reg(r"\d{2}") > int
+    day: Parser[str, int] = reg(r"\d{2}") > int
     # Transform date components into a date object
-    date = year << lit("-") & month << lit("-") & day > (
+    date: Parser[str, date_class] = year << lit("-") & month << lit("-") & day > (
         lambda parts: date_class(*parts)
     )
 
     # Time parser (HH:MM:SS or HH:MM)
-    hour = reg(r"\d{2}") > int
-    minute = reg(r"\d{2}") > int
-    second = reg(r"\d{2}") > int
-    time = hour << lit(":") & minute & opt(lit(":") >> second) > (
+    hour: Parser[str, int] = reg(r"\d{2}") > int
+    minute: Parser[str, int] = reg(r"\d{2}") > int
+    second: Parser[str, int] = reg(r"\d{2}") > int
+    time: Parser[str, time_class] = hour << lit(":") & minute & opt(
+        lit(":") >> second
+    ) > (
         lambda parts: datetime_class.strptime(
             f"{parts[0]:02}:{parts[1]:02}:{parts[2][0] if parts[2] else 0:02}",
             "%H:%M:%S",
         ).time()
     )
 
-    status = opt(lit("*", "!")) > (lambda s: Status(s[0]) if s else Status.Unmarked)
-    payee = reg(r"[^\n]*")
+    status: Parser[str, Status] = opt(lit("*", "!")) > (
+        lambda s: Status(s[0]) if s else Status.Unmarked
+    )
+    payee: Parser[str, str] = reg(r"[^\n]*")
 
     # Account names can contain colons, underscores, periods, and hyphens
     # Transform account name string into AccountName object
-    account_name = positioned(
+    account_name: PositionedParser[str, AccountName] = positioned(
         reg(r"[a-zA-Z0-9:_\.\-]+") > (lambda name: AccountName(parts=name.split(":"))),
         filename="",
     )  # Filename will be populated later
 
     # Amount can have commas and an optional decimal
     # Transform amount string into Decimal
-    amount_value = reg(r"[-+]?[\d, ]*\d(\.\d*)?") > (
+    amount_value: Parser[str, Decimal] = reg(r"[-+]?[\d, ]*\d(\.\d*)?") > (
         lambda s: Decimal(s.replace(",", "").replace(" ", ""))
     )
 
     # Currency can be one or more uppercase letters or anything in double quotes
     # Transform currency string into Commodity object (removing quotes if present)
-    currency = positioned(
+    currency: PositionedParser[str, Commodity] = positioned(
         reg(r'"[^"]+"|\$|[A-Za-z]+') > (lambda name: Commodity(name=name.strip('"'))),
         filename="",
     )  # Filename will be populated later
 
     # Amount parser supporting: QUANTITY [CURRENCY] or CURRENCY QUANTITY
-    amount_qty_first = amount_value & opt(ws >> currency) > (
+    amount_qty_first: Parser[str, Amount] = amount_value & opt(ws >> currency) > (
         lambda parts: Amount(
             quantity=parts[0], commodity=parts[1][0] if parts[1] else Commodity(name="")
         )
     )
-    amount_cur_first = currency & opt(ws) >> amount_value > (
+    amount_cur_first: Parser[str, Amount] = currency & opt(ws) >> amount_value > (
         lambda parts: Amount(quantity=parts[1], commodity=parts[0])
     )  # Allow optional space
-    amount_no_cur = amount_value > (
+    amount_no_cur: Parser[str, Amount] = amount_value > (
         lambda qty: Amount(quantity=qty, commodity=Commodity(name=""))
     )  # Handle amount without currency
 
-    amount = positioned(
+    amount: PositionedParser[str, Amount] = positioned(
         (amount_qty_first | amount_cur_first | amount_no_cur),
         filename="",
     )  # Filename will be populated later
 
-    balance = lit("=") >> ws >> amount
+    balance: Parser[str, Amount] = lit("=") >> ws >> amount
 
     # Cost
-    cost = positioned(
+    cost: PositionedParser[str, Cost] = positioned(
         ((lit("@") | lit("@@")) << ws & amount)
         > (lambda parts: Cost(kind=CostKind(parts[0]), amount=parts[1])),
         filename="",
     )  # Filename will be populated later
 
-    inline_comment = lit(";") >> ows >> reg(r"[^\n]*") > Comment
+    inline_comment: Parser[str, Comment] = lit(";") >> ows >> reg(r"[^\n]*") > Comment
 
-    top_comment = ows >> lit(";", "#") >> ows >> reg(r"[^\n]*") > Comment
+    top_comment: Parser[str, Comment] = (
+        ows >> lit(";", "#") >> ows >> reg(r"[^\n]*") > Comment
+    )
 
     # A non-indented posting
-    posting = positioned(
+    posting: PositionedParser[str, Posting] = positioned(
         account_name
         & opt(ws >> amount)
         & opt(ws >> cost)
@@ -203,10 +216,10 @@ class HledgerParsers(ParserContext, whitespace=None):
     )  # Filename will be populated later
 
     # A transaction starts with a date, status, description, and then postings
-    transaction_code = lit("(") >> reg(r"[^)]+") << lit(")")
+    transaction_code: Parser[str, str] = lit("(") >> reg(r"[^)]+") << lit(")")
 
     # A transaction consists of a header followed by zero or more postings. It must contain closing newline
-    transaction = positioned(
+    transaction: PositionedParser[str, Transaction] = positioned(
         (
             (
                 date << ws
@@ -229,23 +242,25 @@ class HledgerParsers(ParserContext, whitespace=None):
                     p for p in parts[1] if isinstance(p, Posting)
                 ],  # Combine first item and repeated items, then filter
                 comments=[
-                    c for c in parts[1] if isinstance(c, str)
+                    c for c in parts[1] if isinstance(c, Comment)
                 ],  # Combine first item and repeated items, then capture comments
             )
         ),
         filename="",
     )  # Filename will be populated later
 
-    filename = reg(r"[A-Za-z0-9/\._\-]+")  # Allow digits and hyphens in filenames
-    quoted_filename = lit('"') >> filename << lit('"')
+    filename: Parser[str, str] = reg(
+        r"[A-Za-z0-9/\._\-]+"
+    )  # Allow digits and hyphens in filenames
+    quoted_filename: Parser[str, str] = lit('"') >> filename << lit('"')
 
-    include = positioned(
+    include: PositionedParser[str, Include] = positioned(
         lit("include") >> ws >> (quoted_filename | filename)
         > (lambda fn: Include(filename=fn)),
         filename="",
     )
 
-    commodity_directive = positioned(
+    commodity_directive: PositionedParser[str, CommodityDirective] = positioned(
         lit("commodity") >> opt(ws >> amount_value)
         & ws >> currency
         & opt(ws >> inline_comment)
@@ -259,93 +274,103 @@ class HledgerParsers(ParserContext, whitespace=None):
         filename="",
     )
 
-    account_directive = positioned(
+    account_directive: PositionedParser[str, AccountDirective] = positioned(
         lit("account") >> ws >> account_name & opt(ws >> inline_comment)
         > (lambda parts: AccountDirective(name=parts[0], comment=oneify(parts[1]))),
         filename="",
     )
 
     # Alias directive: alias <PATTERN> = <TARGET_ACCOUNT>
-    alias_directive = positioned(
+    alias_directive: PositionedParser[str, Alias] = positioned(
         lit("alias") >> ws >> reg(r"[^\s=]+") << ws << lit("=") << ws & account_name
         > (lambda parts: Alias(pattern=parts[0], target_account=parts[1])),
         filename="",
     )
 
-    # Price directive: P DATE [TIME] COMMODITY UNITPRICE
-    price_directive = positioned(
+    # Price directive: P DATE COMMODITY UNITPRICE
+    price_directive: PositionedParser[str, MarketPrice] = positioned(
         lit("P") >> ws >> date
-        & opt(ws >> time)
         & ws >> currency
         & ws >> amount
         & opt(ws >> inline_comment)
         > (
             lambda parts: MarketPrice(
                 date=parts[0],
-                time=oneify(parts[1]),
-                commodity=parts[2],
-                unit_price=parts[3],
-                comment=oneify(parts[4]),
+                commodity=parts[1],
+                unit_price=parts[2],
+                comment=oneify(parts[3]),
             )
-        ),  # Corrected indices
-        filename="",
-    )
-
-    tli = positioned(
-        (
-            (
-                transaction
-                | include
-                | commodity_directive
-                | account_directive
-                | alias_directive
-                | price_directive
-                | top_comment
-            )
-            > JournalEntry.create
         ),
         filename="",
     )
 
+    tli: Parser[str, JournalEntry] = (
+        transaction
+        | include
+        | commodity_directive
+        | account_directive
+        | alias_directive
+        | price_directive
+        | top_comment
+    ) > JournalEntry.create
+
     # The full journal is just a repetition of top-level items (transactions or includes or etc).
     # Each top-level item is separated by one or more whitespace lines.
-    journal = positioned(
+    journal: PositionedParser[str, Journal] = positioned(
         aws >> repsep(tli, rep(ows << newline)) << aws
         > (
             lambda items: Journal(
                 # Filter out string comments before creating JournalEntry objects. Skip comments.
-                entries=items
+                entries=[item for item in items if isinstance(item, JournalEntry)]
             )
         ),
         filename="",
     )
 
 
-def recursive_include(journal: Journal, journal_fn: str):
+def recursive_include(journal: Journal, journal_fn: str) -> Result[Journal, str]:
     parent_journal_dir = Path(journal_fn).parent
 
-    def include_one(entry: JournalEntry):
+    def include_one(entry: JournalEntry) -> JournalEntry:
         if not entry.include:
             return entry
         include = entry.include
-        include = replace(
-            entry.include,
-            journal=parse_hledger_journal(Path(parent_journal_dir, include.filename)),
-        )
-        return replace(entry, include=include)
+        # Recursively parse included journal and handle the Result
+        included_journal_result = parse_hledger_journal(Path(parent_journal_dir, include.filename))
+        
+        # Use pattern matching to handle the Result
+        match included_journal_result:
+            case Success(included_journal):
+                include = replace(entry.include, journal=included_journal)
+                return replace(entry, include=include)
+            case Failure(error):
+                # Handle the error, perhaps by logging or returning a JournalEntry indicating the error
+                # For now, we'll return the original entry, but this should be improved
+                print(f"Error including file {include.filename}: {error}")
+                return entry
+        raise Exception("Inexhaustive match!")
 
     entries = [include_one(i) for i in journal.entries]
-    return replace(journal, entries=entries)
+    return Success(replace(journal, entries=entries))
+
+def parse_hledger_journal_content(file_content, filename="") -> Result[Journal, ParseError]:
+    # Use map to handle the parsing result instead of unwrap
+    return HledgerParsers.journal.parse(file_content).map(lambda journal: journal.set_filename(filename))
 
 
-def parse_hledger_journal_content(file_content, filename=""):
-    journal = HledgerParsers.journal.parse(file_content).unwrap()
-    journal = journal.set_filename(filename)
-    return recursive_include(journal, filename)
+@safe
+def read_file_content(filename: Path) -> str:
+    return filename.read_text()
 
 
-def parse_hledger_journal(filename: str) -> Journal:
-    path = Path(filename)
-    file_content = path.read_text()
-    full_filename = path.absolute()
-    return parse_hledger_journal_content(file_content, full_filename)
+def parse_hledger_journal(filename: str | Path) -> Result[Journal, Exception]:
+    if not isinstance(filename, Path):
+        filename = Path(filename)
+
+    # Use flow and bind to chain the file reading and parsing operations
+    return flow(
+        filename,
+        read_file_content,
+        bind(lambda file_content: parse_hledger_journal_content(file_content, str(filename))),
+        bind(lambda journal: recursive_include(journal, str(filename)))
+    )
