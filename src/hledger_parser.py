@@ -293,7 +293,7 @@ class HledgerParsers(ParserContext, whitespace=None):
         filename="",
     )
 
-    tli: Parser[str, JournalEntry] = (
+    tli: PositionedParser[str, JournalEntry] = positioned((
         transaction
         | include
         | commodity_directive
@@ -301,7 +301,7 @@ class HledgerParsers(ParserContext, whitespace=None):
         | alias_directive
         | price_directive
         | top_comment
-    ) > JournalEntry.create
+    ) > JournalEntry.create, filename="")
 
     # The full journal is just a repetition of top-level items (transactions or includes or etc).
     # Each top-level item is separated by one or more whitespace lines.

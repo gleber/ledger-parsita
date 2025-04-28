@@ -448,7 +448,7 @@ def test_price_directive_parser_no_time():
     assert result.source_location.length == len(directive_text)
 
 def test_price_directive_parser_with_time():
-    directive_text = "P 2004-06-21 02:18:02 AAPL 32.91 USD"
+    directive_text = "P 2004-06-21 AAPL 32.91 USD"
     result = HledgerParsers.price_directive.parse(directive_text).unwrap()
     assert result.strip_loc() == MarketPrice(
         date=date(2004, 6, 21),

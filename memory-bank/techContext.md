@@ -20,7 +20,9 @@ This document details the technologies, development setup, and dependencies for 
 ## Tool Usage Patterns
 
 - Use `devenv shell` to enter the development environment.
-- Use `python3 -m pytest` for running tests. When fixing unit tests, always rerun just the single test case instead of the whole test suite. Example command: `python3 -m pytest tests/test_find_non_dated_opens.py tests/test_find_non_dated_opens.py::test_find_non_dated_opens`
+- Use `python3 -m pytest` for running tests.
+- When debugging and fixing tests, when a failure is observed ALWAYS test just a single test with command like `python3 -m pytest tests/test_hledger_parser.py::test_journal_and_entities_have_source_location`. Always fix tests one by one. Each fix should be small.
+- Always re-run a single test AFTER EVERY SINGLE CODE MODIFICATION! If not sure which test to run, run all of them.
 - Use `black` and `isort` for code formatting.
 - **New CLI commands will be added for the capital gains tracking tool.**
 
