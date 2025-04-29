@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import List, Optional, Self, Union, Dict, Generic, TypeVar
 from datetime import date, datetime
 from decimal import Decimal
+import re
+
+dated_account_regex = re.compile(r'^assets:.*:.*:\d{8}$')
 
 Output = TypeVar("Output")
 
@@ -129,6 +132,10 @@ class Commodity(PositionAware["Commodity"]):
             return f'"{self.name}"'
         return self.name
 
+    def isCash(self) -> bool:
+        """Checks if the commodity is a cash commodity (USD or PLN)."""
+        return self.name in ["USD", "PLN"]
+
 
 @dataclass
 class Amount(PositionAware["Amount"]):
@@ -190,6 +197,14 @@ class AccountName(PositionAware["AccountName"]):
             return AccountName(self.parts[:-1])
         return None
 
+    def isAsset(self) -> bool:
+        """Checks if the account is an asset account."""
+        return self.name.lower().startswith("assets:")
+
+    def isDatedSubaccount(self) -> bool:
+        """Checks if the account has a dated subaccount."""
+        return bool(dated_account_regex.match(self.name))
+
 
 class Status(Enum):
     """The status of a transaction or posting"""
@@ -202,7 +217,7 @@ class Status(Enum):
         return self.value
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Tag(PositionAware["Tag"]):
     """A tag"""
 
@@ -240,7 +255,7 @@ class CommodityDirective(PositionAware["CommodityDirective"]):
         return s
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Posting(PositionAware["Posting"]):
     """A posting in a transaction"""
 
@@ -278,7 +293,7 @@ class Posting(PositionAware["Posting"]):
         return s.strip()  # Remove any potential trailing whitespace
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Transaction(PositionAware["Transaction"]):
     """A transaction in the ledger"""
 
@@ -306,6 +321,13 @@ class Transaction(PositionAware["Transaction"]):
             s += f"\n  {self.comment.to_journal_string()}"
 
         return s
+
+    def getKey(self):
+        """Returns a unique key for the transaction."""
+        posting_keys = tuple(
+            sorted((str(p.account), str(p.amount) if p.amount else None) for p in self.postings)
+        )
+        return (self.date, self.payee, posting_keys)
 
 
 @dataclass

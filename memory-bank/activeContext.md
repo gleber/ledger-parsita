@@ -13,6 +13,17 @@ This document outlines the current focus and active considerations for ledger-pa
 - Reviewed `README.md`, `src/`, and `tests/` directories.
 - Refined `TagFilter` implementation and tests.
 - Updated memory bank files (`projectbrief.md`, `productContext.md`, `systemPatterns.md`, `techContext.md`) to reflect the new main goal of capital gains tracking.
+- Added `isAsset()` method to `AccountName` class in `src/classes.py`.
+- Updated `src/capital_gains.py` to use the `isAsset()` method instead of regex for identifying asset accounts.
+- Added `tests/test_classes.py` with tests for `AccountName`, including the `isAsset()` method.
+- Added tests to `tests/test_capital_gains.py` for the functions using `isAsset()`.
+- Added tests for `AccountName.isAsset()` and related capital gains functions.
+- Added `getKey()` method to `Transaction` class and used it in capital gains functions for tracking seen transactions.
+- Refactored capital gains finding functions using a higher-order function to deduplicate logic.
+- Attempted to fix failing capital gains tests, but the cause of the failures is unclear and may be related to test data or environment issues.
+- Added `isCash()` method to `Commodity` class in `src/classes.py`.
+- Updated `src/capital_gains.py` to use the `isCash()` method to exclude cash-only transactions.
+- Added tests to `tests/test_capital_gains.py` to ensure cash transactions are excluded.
 
 ## Next Steps
 
