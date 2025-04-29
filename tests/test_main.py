@@ -74,7 +74,9 @@ include journal_b.journal"""
             text=True,
             check=True,
         )
-        output = result.stdout.strip() # Strip leading/trailing whitespace for comparison
+        output = (
+            result.stdout.strip()
+        )  # Strip leading/trailing whitespace for comparison
 
         self.assertEqual(output, expected_output.strip())
 
@@ -113,7 +115,15 @@ include journal_b.journal"""
 
 ; end include journal_b.journal"""
         result = subprocess.run(
-            ["python", "-m", "src.main", "print", "--flat", "--strip", str(main_journal_path)],
+            [
+                "python",
+                "-m",
+                "src.main",
+                "print",
+                "--flat",
+                "--strip",
+                str(main_journal_path),
+            ],
             capture_output=True,
             text=True,
             check=True,
@@ -145,6 +155,41 @@ include journal_b.journal"""
         output = result.stdout.strip()
 
         self.assertEqual(output, expected_output.strip())
+
+    def test_cli_find_positions_command(self):
+        self.maxDiff = None
+        positions_journal_path = TEST_INCLUDES_DIR / "journal_positions.journal"
+        expected_output_lines = [
+            # "Successfully parsed ..." is on stderr, not on stdout
+            "",
+            "Opening Transactions:",
+            "- 2023-01-01 Opening Transaction 1 (Line 0)",
+            "- 2023-01-15 Opening Transaction 2 (Line 132)",
+            "",
+            "Closing Transactions:",
+            "- 2023-02-01 Closing Transaction 1 (Partial) (Line 264)",
+            "- 2023-03-15 Closing Transaction 2 (Full) (Line 521)",
+        ]
+        expected_output = "\n".join(expected_output_lines)
+
+        result = subprocess.run(
+            ["python", "-m", "src.main", "find-positions", str(positions_journal_path)],
+            capture_output=True,
+            text=True,
+            check=True,  # Raise an exception if the command fails
+        )
+        output = result.stdout
+
+        # Split output and expected output into lines for more robust comparison
+        output_lines = output.splitlines()
+        expected_output_lines_stripped = [
+            line.strip() for line in expected_output_lines
+        ]
+        output_lines_stripped = [line.strip() for line in output_lines]
+
+        # Compare line by line, ignoring potential differences in whitespace at the end of lines
+        self.assertEqual(len(output_lines_stripped), len(expected_output_lines_stripped))
+        self.assertEqual(output_lines_stripped, expected_output_lines_stripped)
 
 
 if __name__ == "__main__":

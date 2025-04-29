@@ -10,6 +10,7 @@ import re
 from parsita import ParseError
 from src.classes import Posting, Transaction, sl
 from returns.result import Result, Success, Failure # Add import at the beginning
+from src.capital_gains import find_open_transactions, find_close_transactions
 from returns.pipeline import (flow)
 from returns.pointfree import (bind)
 
@@ -164,6 +165,51 @@ def find_non_dated_opens_cmd(filename: Path):
         click.echo("\nNo transactions found opening positions with non-dated subaccounts.")
 
     # Exit with a zero status code on success
+    exit(0)
+
+
+# Define the find-positions command
+@cli.command("find-positions")
+@click.argument(
+    "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
+)
+def find_positions_cmd(filename: Path):
+    """Finds transactions that open or close positions."""
+    result: Result[Journal, ValueError] = flow(
+        str(filename.absolute()),
+        parse_hledger_journal,
+        bind(lambda journal: parse_filter_strip(journal, True, False, None))
+    )
+
+    match result:
+        case Failure(error):
+            print(f"Error parsing journal file: {error}")
+            exit(1)
+        case Success(journal):
+            parsed_data: Journal = journal
+            click.echo(f"Successfully parsed hledger journal: {filename}", err=True)
+
+    open_txns = find_open_transactions(parsed_data)
+    close_txns = find_close_transactions(parsed_data)
+
+    if open_txns:
+        click.echo("\nOpening Transactions:")
+        for transaction in open_txns:
+            source_loc = transaction.source_location
+            line_info = f"(Line {source_loc.offset})" if source_loc else "(Line N/A)"
+            click.echo(f"- {transaction.date} {transaction.payee} {line_info}")
+    else:
+        click.echo("\nNo opening transactions found.")
+
+    if close_txns:
+        click.echo("\nClosing Transactions:")
+        for transaction in close_txns:
+            source_loc = transaction.source_location
+            line_info = f"(Line {source_loc.offset})" if source_loc else "(Line N/A)"
+            click.echo(f"- {transaction.date} {transaction.payee} {line_info}")
+    else:
+        click.echo("\nNo closing transactions found.")
+
     exit(0)
 
 

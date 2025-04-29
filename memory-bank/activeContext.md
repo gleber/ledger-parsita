@@ -24,6 +24,9 @@ This document outlines the current focus and active considerations for ledger-pa
 - Added `isCash()` method to `Commodity` class in `src/classes.py`.
 - Updated `src/capital_gains.py` to use the `isCash()` method to exclude cash-only transactions.
 - Added tests to `tests/test_capital_gains.py` to ensure cash transactions are excluded.
+- Added the `find-positions` CLI command to `src/main.py` to find open and close transactions.
+- Added a test case for the `find-positions` command in `tests/test_main.py`.
+- Created `tests/includes/journal_positions.journal` for testing the `find-positions` command.
 
 ## Next Steps
 

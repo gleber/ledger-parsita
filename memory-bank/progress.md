@@ -21,14 +21,13 @@ This document tracks the progress, completed features, and remaining tasks for l
 ## What's Left to Build
 
 - **Implement the capital gains tracking tool, including:**
-    - Logic for identifying transactions which open or closed positions.
     - Logic to find open positions which match closed positions using FIFO ordering.
     - Safe in-place journal file update mechanism so that dated lot of open and closed positions are the same.
 - Add comprehensive unit tests for the capital gains tracking tool.
-- Integrate the capital gains tracking tool into the CLI.
 - Ensure comprehensive test coverage for all filtering scenarios and edge cases.
 - Implement additional filter types if needed (future).
 - Develop other reporting features (future).
+- Added CLI command `find-positions` to find open and close transactions.
 
 ## Current Status
 
@@ -39,7 +38,7 @@ This document tracks the progress, completed features, and remaining tasks for l
 
 ## Known Issues
 
-- Some capital gains tests are failing, and the cause is unclear.
+- None.
 
 ## Evolution of Project Decisions
 
