@@ -1,9 +1,19 @@
+from dataclasses import replace
+from typing import Optional, Union
 import click
 import pprint
 from pathlib import Path
+from src.filtering import filter_entries
 from src.hledger_parser import parse_hledger_journal
-from src.classes import Journal
+from src.classes import Journal, JournalEntry
+import re
 from parsita import ParseError
+from src.classes import Posting, Transaction, sl
+from returns.result import Result, Success, Failure # Add import at the beginning
+from src.capital_gains import find_open_transactions, find_close_transactions
+from returns.pipeline import (flow)
+from returns.pointfree import (bind)
+
 
 # Define the main click group
 @click.group()
@@ -11,6 +21,29 @@ def cli():
     """A command-line tool for parsing hledger journal files."""
     pass
 
+def parse_filter_strip(journal: Journal, flat: bool, strip: bool, query: Optional[str]) -> Result[Journal, Union[ParseError, str, ValueError]]:
+    click.echo(f"Successfully parsed hledger journal: {sl(journal.source_location).filename}", err=True)
+
+    filtered_entries = []
+
+    # Apply filtering if a query is provided
+    if query:
+        filter_result = filter_entries(journal.entries, query)
+        match filter_result:
+            case Failure(error):
+                return Failure(ValueError(f"Error filtering entries: {error}")) # Wrap filtering error in ValueError
+            case Success(entries):
+                filtered_entries = entries
+    else:
+        filtered_entries = journal.entries
+
+    filtered_journal = replace(journal, entries=filtered_entries)
+
+    if flat:
+        filtered_journal = filtered_journal.flatten()
+    if strip:
+        filtered_journal = filtered_journal.strip_loc()
+    return Success(filtered_journal) # Return Success with the processed journal
 
 # Define the pprint command
 @cli.command("pprint")  # Explicitly name the command
@@ -23,27 +56,24 @@ def cli():
 @click.option(
     "-s", "--strip", is_flag=True, help="Strip location information from the output."
 )
-def pprint_cmd(filename: Path, flat: bool, strip: bool):
+@click.option(
+    "-q", "--query", type=str, default=None, help="Filter transactions using a query string."
+)
+def pprint_cmd(filename: Path, flat: bool, strip: bool, query: Optional[str]):
     """Parses the journal file and pretty-prints the result."""
-    try:
-        # Pass the absolute path string to the parser function
-        parsed_data = parse_hledger_journal(str(filename.absolute()))
-        print(f"Successfully parsed hledger journal: {filename}")
-        if flat:
-            parsed_data = parsed_data.flatten()
-        if strip:
-            parsed_data = parsed_data.strip_loc()
-        # Use pprint.pformat for better control if needed, or just pprint
-        pprint.pprint(parsed_data, indent=2)  # Add indentation for readability
-    except ParseError as e:
-        # Improve error reporting
-        print(f"Parsing failed in '{filename}': {e}")
-        # Consider showing the problematic line/context if possible from Parsita error
-    except Exception as e:
-        print(f"An unexpected error occurred while processing '{filename}': {e}")
-        # Consider adding traceback for debugging unexpected errors
-        # import traceback
-        # traceback.print_exc()
+    result: Result[Journal, ValueError] = flow(
+        str(filename.absolute()),
+        parse_hledger_journal,
+        bind(lambda journal: parse_filter_strip(journal, flat, strip, query))
+    )
+
+    match result:
+        case Success(journal):
+            pprint.pprint(journal, indent=2)
+            exit(0)
+        case Failure(error):
+            print(f"Error: {error}")
+            exit(1)
 
 
 # Define the print command
@@ -57,27 +87,130 @@ def pprint_cmd(filename: Path, flat: bool, strip: bool):
 @click.option(
     "-s", "--strip", is_flag=True, help="Strip location information from the output."
 )
-def print_cmd(filename: Path, flat: bool, strip: bool):
+@click.option(
+    "-q", "--query", type=str, default=None, help="Filter transactions using a query string."
+)
+def print_cmd(filename: Path, flat: bool, strip: bool, query: Optional[str]):
     """Parses the journal file and prints the result using to_journal_string."""
-    try:
-        # Pass the absolute path string to the parser function
-        parsed_data = parse_hledger_journal(str(filename.absolute()))
-        click.echo(f"Successfully parsed hledger journal: {filename}", err=True)
-        if flat:
-            parsed_data = parsed_data.flatten()
-        if strip:
-            parsed_data = parsed_data.strip_loc()
-        # Use to_journal_string to print the data
-        print(parsed_data.to_journal_string())
-    except ParseError as e:
-        # Improve error reporting
-        print(f"Parsing failed in '{filename}': {e}")
-        # Consider showing the problematic line/context if possible from Parsita error
-    except Exception as e:
-        print(f"An unexpected error occurred while processing '{filename}': {e}")
-        # Consider adding traceback for debugging unexpected errors
-        # import traceback
-        # traceback.print_exc()
+    parse_result = parse_hledger_journal(str(filename.absolute()))
+
+    match parse_result:
+        case Success(journal):
+            process_result = parse_filter_strip(journal, flat, strip, query)
+            match process_result:
+                case Success(processed_journal):
+                    print(processed_journal.to_journal_string())
+                    exit(0)
+                case Failure(error):
+                    print(f"Error processing journal: {error}")
+                    exit(1)
+        case Failure(error):
+            print(f"Error parsing journal file: {error}")
+            exit(1)
+
+
+def is_opening_position(posting: Posting) -> bool:
+    """Checks if a posting represents an opening position (assets account with positive quantity), excluding assets:cash."""
+    return (
+        posting.account.name.startswith("assets:")
+        and posting.account.name != "assets:cash" # Exclude assets:cash
+        and posting.amount is not None
+        and posting.amount.quantity > 0
+    )
+
+def is_non_dated_account(account_name: str) -> bool:
+    """Checks if an account name is non-dated based on the :YYYYMMDD pattern."""
+    return not re.search(r":\d{8}$", account_name)
+
+def find_non_dated_opening_transactions(journal: Journal) -> list[Transaction]:
+    """Finds transactions with non-dated opening positions."""
+    non_dated_opens: list[Transaction] = []
+    for entry in journal.entries:
+        if entry.transaction: # Check if the entry is a transaction
+            for posting in entry.transaction.postings:
+                if is_opening_position(posting) and is_non_dated_account(posting.account.name):
+                    non_dated_opens.append(entry.transaction)
+                    break # Only add the transaction once per entry
+    return non_dated_opens
+
+# Define the find-non-dated-opens command
+@cli.command("find-non-dated-opens")
+@click.argument(
+    "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
+)
+def find_non_dated_opens_cmd(filename: Path):
+    """Finds transactions opening positions using non-dated subaccounts."""
+    parse_result: Result[Journal, Union[ParseError, str, Exception]] = parse_hledger_journal(str(filename.absolute()))
+
+    match parse_result:
+        case Failure(error):
+            # Print the error message from the Failure and exit with a non-zero status code
+            print(f"Error parsing journal file: {error}")
+            exit(1)
+        case Success(journal):
+            # If parsing was successful, unwrap the result and proceed
+            parsed_data: Journal = journal
+            click.echo(f"Successfully parsed hledger journal: {filename}", err=True)
+
+    non_dated_opens = find_non_dated_opening_transactions(parsed_data)
+
+    if non_dated_opens:
+        click.echo("\nTransactions opening positions with non-dated subaccounts:")
+        for transaction in non_dated_opens:
+            # Access attributes directly from the Transaction object
+            source_loc = transaction.source_location
+            line_info = f"(Line {source_loc.offset})" if source_loc else "(Line N/A)"
+            click.echo(f"- {transaction.date} {transaction.payee} {line_info}")
+    else:
+        click.echo("\nNo transactions found opening positions with non-dated subaccounts.")
+
+    # Exit with a zero status code on success
+    exit(0)
+
+
+# Define the find-positions command
+@cli.command("find-positions")
+@click.argument(
+    "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
+)
+def find_positions_cmd(filename: Path):
+    """Finds transactions that open or close positions."""
+    result: Result[Journal, ValueError] = flow(
+        str(filename.absolute()),
+        parse_hledger_journal,
+        bind(lambda journal: parse_filter_strip(journal, True, False, None))
+    )
+
+    match result:
+        case Failure(error):
+            print(f"Error parsing journal file: {error}")
+            exit(1)
+        case Success(journal):
+            parsed_data: Journal = journal
+            click.echo(f"Successfully parsed hledger journal: {filename}", err=True)
+
+    open_txns = find_open_transactions(parsed_data)
+    close_txns = find_close_transactions(parsed_data)
+
+    if open_txns:
+        click.echo("\nOpening Transactions:")
+        for transaction in open_txns:
+            source_loc = transaction.source_location
+            line_info = f"(Line {source_loc.offset})" if source_loc else "(Line N/A)"
+            click.echo(f"- {transaction.date} {transaction.payee} {line_info}")
+    else:
+        click.echo("\nNo opening transactions found.")
+
+    if close_txns:
+        click.echo("\nClosing Transactions:")
+        for transaction in close_txns:
+            source_loc = transaction.source_location
+            line_info = f"(Line {source_loc.offset})" if source_loc else "(Line N/A)"
+            click.echo(f"- {transaction.date} {transaction.payee} {line_info}")
+    else:
+        click.echo("\nNo closing transactions found.")
+
+    exit(0)
 
 
 if __name__ == "__main__":

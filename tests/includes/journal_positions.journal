@@ -1,0 +1,25 @@
+2023-01-01 Opening Transaction 1
+  assets:broker:stock:AAPL:20230101  10 AAPL @ 150.00 USD
+  equity:opening-balances  -1500.00 USD
+
+2023-01-15 Opening Transaction 2
+  assets:broker:stock:GOOG:20230115  5 GOOG @ 1000.00 USD
+  equity:opening-balances  -5000.00 USD
+
+2023-02-01 Closing Transaction 1 (Partial)
+  assets:broker:stock:AAPL:20230101  -5 AAPL @ 170.00 USD
+  assets:cash  850.00 USD
+  income:capital-gains
+
+2023-03-01 Opening Transaction 3 (Cash)
+  assets:cash  100.00 USD
+  equity:opening-balances  -100.00 USD
+
+2023-03-15 Closing Transaction 2 (Full)
+  assets:broker:stock:GOOG:20230115  -5 GOOG @ 1100.00 USD
+  assets:cash  5500.00 USD
+  income:capital-gains
+
+2023-04-01 Non-Position Transaction
+  expenses:food  10.00 USD
+  assets:cash  -10.00 USD

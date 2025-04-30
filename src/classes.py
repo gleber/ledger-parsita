@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from dataclasses import dataclass, field, fields, replace
 from enum import Enum
@@ -6,8 +7,20 @@ from pathlib import Path
 from typing import List, Optional, Self, Union, Dict, Generic, TypeVar
 from datetime import date, datetime
 from decimal import Decimal
+import re
+
+dated_account_regex = re.compile(r'^assets:.*:.*:\d{8}$')
 
 Output = TypeVar("Output")
+
+@dataclass
+class BaseFilter(ABC):
+    """Abstract base class for all filter conditions."""
+
+    @abstractmethod
+    def is_matching(self, transaction: "Transaction") -> bool:
+        """Checks if the transaction matches the filter condition."""
+        pass
 
 
 class PositionAware(Generic[Output]):
@@ -19,8 +32,8 @@ class PositionAware(Generic[Output]):
     the final value.
     """
 
-    def set_position(self, filename: str, start: int, length: int) -> Self:
-        return replace(
+    def set_position(self, filename: Path, start: int, length: int) -> Self:        
+        return replace( # type: ignore
             self,
             source_location=SourceLocation(
                 filename=filename, offset=start, length=length
@@ -29,10 +42,13 @@ class PositionAware(Generic[Output]):
 
     def strip_loc(self):
         stripped_fields = {
-            field.name: getattr(self, field.name) for field in fields(self)
+            # Mypy can't handle self well
+            field.name: getattr(self, field.name) for field in fields(self)  # type: ignore
         }
 
         def strip_one(v):
+            if v is None:  # Add check for None
+                return None
             if isinstance(v, PositionAware):
                 return v.strip_loc()
             if isinstance(v, Iterable) and not isinstance(v, str):
@@ -42,12 +58,14 @@ class PositionAware(Generic[Output]):
         for k in stripped_fields.keys():
             stripped_fields[k] = strip_one(stripped_fields[k])
         stripped_fields["source_location"] = None
-        return replace(self, **stripped_fields)
+        # mypy can't handle self well
+        return replace(self, **stripped_fields) # type: ignore
 
     def set_filename(self, filename):
         if not isinstance(self, PositionAware):
             return self
-        sub_fields = {field.name: getattr(self, field.name) for field in fields(self)}
+        # mypy can't handle self well
+        sub_fields = {field.name: getattr(self, field.name) for field in fields(self)} # type: ignore
 
         def set_one(v):
             if isinstance(v, PositionAware):
@@ -63,9 +81,10 @@ class PositionAware(Generic[Output]):
         sl = sub_fields["source_location"]
         if isinstance(sl, SourceLocation) and sl is not None:
             sub_fields["source_location"] = replace(
-                sub_fields["source_location"], filename=filename
+                sub_fields["source_location"], filename=filename.resolve()
             )
-        return replace(self, **sub_fields)
+        # mypy can't handle self well
+        return replace(self, **sub_fields) # type: ignore
 
 
 class CostKind(Enum):
@@ -84,6 +103,10 @@ class SourceLocation:
     offset: int
     length: int
 
+def sl(sl: SourceLocation | None) -> SourceLocation:
+    if sl is None:
+        return SourceLocation(Path(""), 0, 0)
+    return sl
 
 @dataclass
 class Comment:
@@ -108,6 +131,10 @@ class Commodity(PositionAware["Commodity"]):
         if not self.name.isalnum():
             return f'"{self.name}"'
         return self.name
+
+    def isCash(self) -> bool:
+        """Checks if the commodity is a cash commodity (USD or PLN)."""
+        return self.name in ["USD", "PLN"]
 
 
 @dataclass
@@ -170,6 +197,14 @@ class AccountName(PositionAware["AccountName"]):
             return AccountName(self.parts[:-1])
         return None
 
+    def isAsset(self) -> bool:
+        """Checks if the account is an asset account."""
+        return self.name.lower().startswith("assets:")
+
+    def isDatedSubaccount(self) -> bool:
+        """Checks if the account has a dated subaccount."""
+        return bool(dated_account_regex.match(self.name))
+
 
 class Status(Enum):
     """The status of a transaction or posting"""
@@ -182,7 +217,7 @@ class Status(Enum):
         return self.value
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Tag(PositionAware["Tag"]):
     """A tag"""
 
@@ -206,7 +241,7 @@ class CommodityDirective(PositionAware["CommodityDirective"]):
     """A commodity directive"""
 
     commodity: Commodity
-    example_amount: Amount = None
+    example_amount: Optional[Amount] = None
     comment: Optional[Comment] = None
     source_location: Optional["SourceLocation"] = None
 
@@ -220,7 +255,7 @@ class CommodityDirective(PositionAware["CommodityDirective"]):
         return s
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Posting(PositionAware["Posting"]):
     """A posting in a transaction"""
 
@@ -258,7 +293,7 @@ class Posting(PositionAware["Posting"]):
         return s.strip()  # Remove any potential trailing whitespace
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Transaction(PositionAware["Transaction"]):
     """A transaction in the ledger"""
 
@@ -286,6 +321,13 @@ class Transaction(PositionAware["Transaction"]):
             s += f"\n  {self.comment.to_journal_string()}"
 
         return s
+
+    def getKey(self):
+        """Returns a unique key for the transaction."""
+        posting_keys = tuple(
+            sorted((str(p.account), str(p.amount) if p.amount else None) for p in self.postings)
+        )
+        return (self.date, self.payee, posting_keys)
 
 
 @dataclass
@@ -336,14 +378,11 @@ class MarketPrice(PositionAware["MarketPrice"]):
     unit_price: (
         Amount  # The price per unit (Amount includes quantity and price commodity)
     )
-    time: Optional[datetime] = None  # Optional time component
     comment: Optional[Comment] = None  # Add comment field
     source_location: Optional["SourceLocation"] = None
 
     def to_journal_string(self) -> str:
         s = f"P {self.date.strftime('%Y-%m-%d')}"
-        if self.time:
-            s += f" {self.time.strftime('%H:%M:%S')}"
         s += f" {self.commodity.to_journal_string()} {self.unit_price.to_journal_string()}"
         if self.comment:
             s += f" {self.comment.to_journal_string()}"
@@ -425,8 +464,9 @@ class JournalEntry(PositionAware["JournalEntry"]):
             | AccountDirective
             | Alias
             | MarketPrice
+            | Comment # Add Comment to type hint
         ),
-    ):  # Add MarketPrice to type hint
+    ):
         if isinstance(item, Transaction):
             return JournalEntry(transaction=item)
         if isinstance(item, Include):
@@ -437,7 +477,7 @@ class JournalEntry(PositionAware["JournalEntry"]):
             return JournalEntry(account_directive=item)
         if isinstance(item, Alias):
             return JournalEntry(alias=item)
-        if isinstance(item, MarketPrice):  # Add check for MarketPrice
+        if isinstance(item, MarketPrice):
             return JournalEntry(market_price=item)
         if isinstance(item, Comment):
             return JournalEntry(comment=item)

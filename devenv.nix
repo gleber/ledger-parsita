@@ -9,12 +9,12 @@
   languages.python.venv.requirements = ''
     parsita
     click
+    returns[compatible-mypy]
+    pytest
   '';
 
   # Add other development tools
-  packages = [
-    pkgs.git
-  ];
+  packages = [ ];
 
   # Commands to run when entering the shell
   enterShell = ''
@@ -23,6 +23,6 @@
   '';
 
   enterTest = ''
-    python3 -m unittest discover -s tests
+    python3 -m pytest
   '';
 }

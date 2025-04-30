@@ -1,0 +1,24 @@
+2023/01/01 Opening Balance
+    assets:cash                 1000 USD
+    equity:opening-balances
+
+2023/01/05 Buy Stock
+    assets:broker:stock:AAPL     10 AAPL
+    assets:cash               -1000 USD
+
+2023/01/10 Buy Stock Dated
+    assets:broker:stock:GOOG:20230110     5 GOOG
+    assets:cash                       -500 USD
+
+2023/01/15 Another Non-Dated Buy
+    assets:broker:crypto:BTC     0.5 BTC
+    assets:cash                 -200 USD
+
+2023/01/20 Expense Transaction
+    expenses:food                 50 USD
+    assets:cash                  -50 USD
+
+2023/01/25 Sell Stock Dated
+    assets:broker:stock:GOOG:20230110    -5 GOOG
+    assets:cash                       +600 USD
+    income:capital-gains
