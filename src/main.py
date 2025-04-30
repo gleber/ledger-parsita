@@ -1,4 +1,5 @@
 from dataclasses import replace
+from collections import defaultdict
 from typing import Optional, Union
 import click
 import pprint
@@ -118,15 +119,22 @@ def is_opening_position(posting: Posting) -> bool:
         and posting.amount.quantity > 0
     )
 
-def find_non_dated_opening_transactions(journal: Journal) -> list[Transaction]:
+def find_non_dated_stock_txs(journal: Journal) -> list[Transaction]:
     """Finds transactions with non-dated opening positions."""
     non_dated_opens: list[Transaction] = []
+    unique_commodity = {}
     for entry in journal.entries:
         if entry.transaction: # Check if the entry is a transaction
             for posting in entry.transaction.postings:
-                if is_opening_position(posting) and posting.account.isDatedSubaccount():
+                if posting.amount and posting.amount.commodity:
+                    unique_commodity[posting.amount.commodity.name] = posting.amount.commodity
+                if posting.isOpening() and not posting.account.isDatedSubaccount() and posting.account.isAsset() and posting.amount and posting.amount.commodity and (posting.amount.commodity.isStock()): # or posting.amount.commodity.isOption()):
                     non_dated_opens.append(entry.transaction)
-                    break # Only add the transaction once per entry
+                    break
+    # kinds = defaultdict(list)
+    # for v in unique_commodity.values():
+    #     kinds[v.kind].append(v.name)
+    # pprint.pprint(dict(kinds))
     return non_dated_opens
 
 # Define the find-non-dated-opens command
@@ -151,17 +159,22 @@ def find_non_dated_opens_cmd(filename: Path):
             parsed_data: Journal = journal
             click.echo(f"Successfully parsed hledger journal: {filename}", err=True)
 
-    non_dated_opens = find_non_dated_opening_transactions(parsed_data)
+    non_dated_opens = find_non_dated_stock_txs(parsed_data)
 
     if non_dated_opens:
-        click.echo("\nTransactions opening positions with non-dated subaccounts:")
+        click.echo("\nTransactions positions with non-dated subaccounts:", err=True)
         for transaction in non_dated_opens:
             # Access attributes directly from the Transaction object
-            source_loc = transaction.source_location
-            line_info = f"(Line {source_loc.offset})" if source_loc else "(Line N/A)"
-            click.echo(f"- {transaction.date} {transaction.payee} {line_info}")
+            sl = transaction.source_location
+            #line_info = f"(at {sl.filename}:{sl.line}:{sl.column})" if sl else "(Line N/A)"
+            line_info = f"{sl.filename}:{sl.line}:{sl.column}" if sl else "(Line N/A)"
+            side = transaction.side()
+            # click.echo(f"- {transaction.date} {side} {transaction.payee} {line_info}")
+            click.echo(f"; {line_info}")
+            click.echo(transaction.to_journal_string())
+            click.echo(f"")
     else:
-        click.echo("\nNo transactions found opening positions with non-dated subaccounts.")
+        click.echo("\nNo transactions found positions with non-dated subaccounts.")
 
     # Exit with a zero status code on success
     exit(0)

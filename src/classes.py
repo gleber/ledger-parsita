@@ -1,5 +1,6 @@
 from abc import abstractmethod
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field, fields, replace
 from enum import Enum
@@ -8,6 +9,9 @@ from typing import List, Optional, Self, Union, Dict, Generic, TypeVar
 from datetime import date, datetime
 from decimal import Decimal
 import re
+
+CASH_TICKERS = ["USD", "PLN", "EUR"]
+CRYPTO_TICKERS = ["BTC", "ETH", "XRP", "LTC", "BCH", "ADA", "DOT", "UNI", "LINK", "SOL", "PseudoUSD", "BUSD", "FDUSD", "USDT", "USDC", "FTM", "ALGO"]
 
 Output = TypeVar("Output")
 
@@ -140,6 +144,13 @@ class Comment(PositionAware["Comment"]):
         return f"; {self.comment}"
 
 
+class CommodityKind(Enum):
+    CASH = "CASH"
+    CRYPTO = "CRYPTO"
+    OPTION = "OPTION"
+    STOCK = "STOCK"
+
+
 @dataclass
 class Commodity(PositionAware["Commodity"]):
     """A commodity"""
@@ -155,9 +166,42 @@ class Commodity(PositionAware["Commodity"]):
             return f'"{self.name}"'
         return self.name
 
+    @property
+    def kind(self) -> CommodityKind:
+        kinds = {
+            CommodityKind.CASH: self.isCash(),
+            CommodityKind.CRYPTO: self.isCrypto(),
+            CommodityKind.OPTION: self.isOption(),
+            CommodityKind.STOCK: self.isStock(),
+        }
+        f = defaultdict(list)
+        for k, v in kinds.items():
+            f[v].append(k)
+        if len(f[True]) != 1:
+            raise Exception(f"Invalid commodity {self.name} type: {kinds}")
+        return f[True][0]
+
+
     def isCash(self) -> bool:
         """Checks if the commodity is a cash commodity (USD or PLN)."""
-        return self.name in ["USD", "PLN"]
+        return self.name in CASH_TICKERS
+
+    def isStock(self) -> bool:
+        """Checks if the commodity is likely a stock (simple ticker check)."""
+        # Check for 1-5 uppercase letters and ensure it's not a known cryptocurrency or cash
+        return bool(re.fullmatch(r"[A-Z\.]{1,5}", self.name)) and not self.isCash() and not self.isCrypto()
+
+    def isCrypto(self) -> bool:
+        """Checks if the commodity is a known cryptocurrency."""
+        # Predefined list of common cryptocurrencies
+        return self.name in CRYPTO_TICKERS
+
+    def isOption(self) -> bool:
+        """Checks if the commodity is likely an option contract (basic pattern check)."""
+        # Basic regex for a common option format (e.g., TSLA260116C200, TSLA260116c200)
+        # This is a simplified pattern and might need refinement
+        option_regex = re.compile(r"^[A-Z]+(?:\d{6})?[CPcp]\d+(\.\d+)?$")
+        return bool(option_regex.match(self.name))
 
 
 @dataclass
@@ -297,6 +341,16 @@ class Posting(PositionAware["Posting"]):
     tags: List[Tag] = field(default_factory=list)
     source_location: Optional["SourceLocation"] = None
 
+    def isOpening(self) -> bool:
+        """Checks if a posting indicates opening a position in an asset account and is not cash."""
+        return bool(
+            self.account
+            and self.account.isAsset()
+            and self.amount
+            and self.amount.quantity > 0
+            and not self.amount.commodity.isCash()
+        )
+
     def to_journal_string(self) -> str:
         s = ""
         if self.status:
@@ -318,6 +372,12 @@ class Posting(PositionAware["Posting"]):
             s += f" {self.comment.to_journal_string()}"
 
         return s.strip()  # Remove any potential trailing whitespace
+
+
+class TransactionSide(Enum):
+    UNKNOWN = "UNKNOWN"
+    OPEN = "OPEN"
+    CLOSE = "CLOSE"
 
 
 @dataclass(unsafe_hash=True)
@@ -348,6 +408,9 @@ class Transaction(PositionAware["Transaction"]):
             s += f"\n  {self.comment.to_journal_string()}"
 
         return s
+    
+    def side(self) -> TransactionSide:
+        return TransactionSide.UNKNOWN
 
     def getKey(self):
         """Returns a unique key for the transaction."""

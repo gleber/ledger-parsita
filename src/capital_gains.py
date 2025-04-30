@@ -54,16 +54,6 @@ def find_transactions_by_posting_criteria(
 
 
 # Posting filter functions
-def is_open_position_posting(posting: Posting) -> bool:
-    """Checks if a posting indicates opening a position in an asset account and is not cash."""
-    return bool(
-        posting.account
-        and posting.account.isAsset()
-        and posting.amount
-        and posting.amount.quantity > 0
-        and not posting.amount.commodity.isCash()
-    )
-
 
 def is_close_position_posting(posting: Posting) -> bool:
     """Checks if a posting indicates closing a position in an asset account and is not cash."""
@@ -107,7 +97,7 @@ def find_open_transactions(journal: Journal) -> List[Transaction]:
     in an asset account (indicating an opening position), regardless of dated subaccount.
     Returns a list of unique Transaction objects.
     """
-    return find_transactions_by_posting_criteria(journal, is_open_position_posting)
+    return find_transactions_by_posting_criteria(journal, lambda posting: posting.isOpening())
 
 
 def find_close_transactions(journal: Journal) -> List[Transaction]:
@@ -167,7 +157,7 @@ def match_fifo(journal: Journal) -> List[MatchResult]:
         if entry.transaction:
             tx = entry.transaction
             for posting in tx.postings:
-                if is_open_position_with_dated_subaccount_posting(posting) and posting.amount is not None:
+                if posting.isOpening() and posting.account and posting.account.isDatedSubaccount() and posting.amount is not None:
                     # Add to open lots
                     base_account = get_base_account_name(posting.account)
                     if posting.amount is not None: # Redundant check for Mypy
