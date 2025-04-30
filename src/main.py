@@ -118,17 +118,13 @@ def is_opening_position(posting: Posting) -> bool:
         and posting.amount.quantity > 0
     )
 
-def is_non_dated_account(account_name: str) -> bool:
-    """Checks if an account name is non-dated based on the :YYYYMMDD pattern."""
-    return not re.search(r":\d{8}$", account_name)
-
 def find_non_dated_opening_transactions(journal: Journal) -> list[Transaction]:
     """Finds transactions with non-dated opening positions."""
     non_dated_opens: list[Transaction] = []
     for entry in journal.entries:
         if entry.transaction: # Check if the entry is a transaction
             for posting in entry.transaction.postings:
-                if is_opening_position(posting) and is_non_dated_account(posting.account.name):
+                if is_opening_position(posting) and posting.account.isDatedSubaccount():
                     non_dated_opens.append(entry.transaction)
                     break # Only add the transaction once per entry
     return non_dated_opens
@@ -140,9 +136,12 @@ def find_non_dated_opening_transactions(journal: Journal) -> list[Transaction]:
 )
 def find_non_dated_opens_cmd(filename: Path):
     """Finds transactions opening positions using non-dated subaccounts."""
-    parse_result: Result[Journal, Union[ParseError, str, Exception]] = parse_hledger_journal(str(filename.absolute()))
-
-    match parse_result:
+    result: Result[Journal, ValueError] = flow(
+        str(filename.absolute()),
+        parse_hledger_journal,
+        bind(lambda journal: parse_filter_strip(journal, True, False, None))
+    )
+    match result:
         case Failure(error):
             # Print the error message from the Failure and exit with a non-zero status code
             print(f"Error parsing journal file: {error}")

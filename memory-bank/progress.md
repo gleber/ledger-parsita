@@ -16,6 +16,7 @@ This document tracks the progress, completed features, and remaining tasks for l
 - Attempted to fix failing capital gains tests, but the cause of the failures is unclear and may be related to test data or environment issues.
 - Added `isCash()` method to `Commodity` class and used it in `capital_gains.py` to exclude cash-only transactions.
 - Added tests to `tests/test_capital_gains.py` to ensure cash transactions are excluded.
+- The `isDatedSubaccount` method was found to be already implemented and tested in `src/classes.py`.
 - **All currently implemented tests are passing (including fixes for journal flattening and journal string conversion).**
 
 ## What's Left to Build

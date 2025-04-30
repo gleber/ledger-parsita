@@ -9,9 +9,8 @@ from datetime import date, datetime
 from decimal import Decimal
 import re
 
-dated_account_regex = re.compile(r'^assets:.*:.*:\d{8}$')
-
 Output = TypeVar("Output")
+
 
 @dataclass
 class BaseFilter(ABC):
@@ -32,18 +31,19 @@ class PositionAware(Generic[Output]):
     the final value.
     """
 
-    def set_position(self, filename: Path, start: int, length: int) -> Self:        
-        return replace( # type: ignore
+    source_location: Optional["SourceLocation"] = None
+
+    def set_position(self, start: int, length: int) -> Self:
+        return replace(  # type: ignore
             self,
-            source_location=SourceLocation(
-                filename=filename, offset=start, length=length
-            ),
+            source_location=SourceLocation(filename=Path(""), offset=start, length=length),
         )
 
     def strip_loc(self):
         stripped_fields = {
             # Mypy can't handle self well
-            field.name: getattr(self, field.name) for field in fields(self)  # type: ignore
+            field.name: getattr(self, field.name)
+            for field in fields(self)  # type: ignore
         }
 
         def strip_one(v):
@@ -59,17 +59,29 @@ class PositionAware(Generic[Output]):
             stripped_fields[k] = strip_one(stripped_fields[k])
         stripped_fields["source_location"] = None
         # mypy can't handle self well
-        return replace(self, **stripped_fields) # type: ignore
+        return replace(self, **stripped_fields)  # type: ignore
 
-    def set_filename(self, filename):
-        if not isinstance(self, PositionAware):
-            return self
+    def _calculate_line_column(self, content: str, offset: int) -> tuple[int, int]:
+        """Calculates the 1-based line and column number from an offset."""
+        line = 1
+        column = 1
+        for i, char in enumerate(content):
+            if i == offset:
+                break
+            if char == "\n":
+                line += 1
+                column = 1
+            else:
+                column += 1
+        return line, column
+
+    def set_filename(self, filename: Path, file_content: str) -> Self:
         # mypy can't handle self well
-        sub_fields = {field.name: getattr(self, field.name) for field in fields(self)} # type: ignore
+        sub_fields = {field.name: getattr(self, field.name) for field in fields(self)}  # type: ignore
 
         def set_one(v):
             if isinstance(v, PositionAware):
-                return v.set_filename(filename)
+                return v.set_filename(filename, file_content)
             if isinstance(v, Iterable) and not isinstance(v, str):
                 return [set_one(i) for i in v]
             return v
@@ -80,8 +92,15 @@ class PositionAware(Generic[Output]):
             raise Exception(f"{self} does not have source_location!")
         sl = sub_fields["source_location"]
         if isinstance(sl, SourceLocation) and sl is not None:
-            sub_fields["source_location"] = replace(
-                sub_fields["source_location"], filename=filename.resolve()
+            start_offset = sl.offset
+            length = sl.length
+            line, column = self._calculate_line_column(file_content, start_offset)
+            sub_fields["source_location"] = SourceLocation(
+                filename=filename.resolve(),
+                offset=start_offset,
+                length=length,
+                line=line,
+                column=column,
             )
         # mypy can't handle self well
         return replace(self, **sub_fields) # type: ignore
@@ -102,14 +121,18 @@ class SourceLocation:
     filename: Path
     offset: int
     length: int
+    line: Optional[int] = None
+    column: Optional[int] = None
+
 
 def sl(sl: SourceLocation | None) -> SourceLocation:
     if sl is None:
-        return SourceLocation(Path(""), 0, 0)
+        return SourceLocation(Path(""), 0, 0, None, None)
     return sl
 
+
 @dataclass
-class Comment:
+class Comment(PositionAware["Comment"]):
     comment: str
     source_location: Optional["SourceLocation"] = None
 
@@ -203,7 +226,11 @@ class AccountName(PositionAware["AccountName"]):
 
     def isDatedSubaccount(self) -> bool:
         """Checks if the account has a dated subaccount."""
-        return bool(dated_account_regex.match(self.name))
+        # 20251015
+        dated_account_regex = re.compile(r"^\d{8}$")
+        if not self.parts:
+            return False
+        return bool(dated_account_regex.match(self.parts[-1]))
 
 
 class Status(Enum):
@@ -325,7 +352,10 @@ class Transaction(PositionAware["Transaction"]):
     def getKey(self):
         """Returns a unique key for the transaction."""
         posting_keys = tuple(
-            sorted((str(p.account), str(p.amount) if p.amount else None) for p in self.postings)
+            sorted(
+                (str(p.account), str(p.amount) if p.amount else None)
+                for p in self.postings
+            )
         )
         return (self.date, self.payee, posting_keys)
 
@@ -436,7 +466,11 @@ class JournalEntry(PositionAware["JournalEntry"]):
     def to_journal_string(self) -> str:
         r = []
         if self.source_location:
-            r.append(Comment(comment=f"{self.source_location.filename}:{self.source_location.offset}:{self.source_location.length}").to_journal_string())
+            r.append(
+                Comment(
+                    comment=f"{self.source_location.filename}:{self.source_location.offset}:{self.source_location.length}"
+                ).to_journal_string()
+            )
         if self.transaction:
             r.append(self.transaction.to_journal_string())
         elif self.include:
@@ -464,7 +498,7 @@ class JournalEntry(PositionAware["JournalEntry"]):
             | AccountDirective
             | Alias
             | MarketPrice
-            | Comment # Add Comment to type hint
+            | Comment  # Add Comment to type hint
         ),
     ):
         if isinstance(item, Transaction):

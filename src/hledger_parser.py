@@ -54,11 +54,10 @@ class PositionedParser(
     Generic[Input, Output_positioned], Parser[Input, Output_positioned]
 ):
     def __init__(
-        self, parser: Parser[Input, PositionAware[Output_positioned]], filename: str
+        self, parser: Parser[Input, PositionAware[Output_positioned]]
     ):
         super().__init__()
         self.parser = parser
-        self.filename = Path(filename)
 
     def _consume(
         self, state: State, reader: Reader[Input]
@@ -70,7 +69,7 @@ class PositionedParser(
             end = status.remainder.position
             return Continue(
                 status.remainder,
-                status.value.set_position(self.filename, start, end - start),  # type: ignore
+                status.value.set_position(start, end - start),  # type: ignore
             )
         else:
             return status
@@ -80,7 +79,7 @@ class PositionedParser(
 
 
 def positioned(
-    parser: Parser[Input, PositionAware[Output_positioned]], filename: str
+    parser: Parser[Input, PositionAware[Output_positioned]]
 ) -> PositionedParser[Input, Output_positioned]:
     """Set the position on a PositionAware value.
 
@@ -93,7 +92,7 @@ def positioned(
         parser: Parser
         filename: The name of the source file being parsed
     """
-    return PositionedParser(parser, filename)
+    return PositionedParser(parser)
 
 
 def listify(x):
@@ -136,8 +135,7 @@ class HledgerParsers(ParserContext, whitespace=None):
     # Account names can contain colons, underscores, periods, and hyphens
     # Transform account name string into AccountName object
     account_name: PositionedParser[str, AccountName] = positioned(
-        reg(r"[a-zA-Z0-9:_\.\-]+") > (lambda name: AccountName(parts=name.split(":"))),
-        filename="",
+        reg(r"[a-zA-Z0-9:_\.\-]+") > (lambda name: AccountName(parts=name.split(":")))
     )  # Filename will be populated later
 
     # Amount can have commas and an optional decimal
@@ -149,8 +147,7 @@ class HledgerParsers(ParserContext, whitespace=None):
     # Currency can be one or more uppercase letters or anything in double quotes
     # Transform currency string into Commodity object (removing quotes if present)
     currency: PositionedParser[str, Commodity] = positioned(
-        reg(r'"[^"]+"|\$|[A-Za-z]+') > (lambda name: Commodity(name=name.strip('"'))),
-        filename="",
+        reg(r'"[^"]+"|\$|[A-Za-z]+') > (lambda name: Commodity(name=name.strip('"')))
     )  # Filename will be populated later
 
     # Amount parser supporting: QUANTITY [CURRENCY] or CURRENCY QUANTITY
@@ -167,8 +164,7 @@ class HledgerParsers(ParserContext, whitespace=None):
     )  # Handle amount without currency
 
     amount: PositionedParser[str, Amount] = positioned(
-        (amount_qty_first | amount_cur_first | amount_no_cur),
-        filename="",
+        (amount_qty_first | amount_cur_first | amount_no_cur)
     )  # Filename will be populated later
 
     balance: Parser[str, Amount] = lit("=") >> ws >> amount
@@ -176,8 +172,7 @@ class HledgerParsers(ParserContext, whitespace=None):
     # Cost
     cost: PositionedParser[str, Cost] = positioned(
         ((lit("@") | lit("@@")) << ws & amount)
-        > (lambda parts: Cost(kind=CostKind(parts[0]), amount=parts[1])),
-        filename="",
+        > (lambda parts: Cost(kind=CostKind(parts[0]), amount=parts[1]))
     )  # Filename will be populated later
 
     inline_comment: Parser[str, Comment] = lit(";") >> ows >> reg(r"[^\n]*") > Comment
@@ -201,8 +196,7 @@ class HledgerParsers(ParserContext, whitespace=None):
                 balance=oneify(parts[3]),
                 comment=oneify(parts[4]),
             )
-        ),
-        filename="",
+        )
     )  # Filename will be populated later
 
     # A transaction starts with a date, status, description, and then postings
@@ -235,8 +229,7 @@ class HledgerParsers(ParserContext, whitespace=None):
                     c for c in parts[1] if isinstance(c, Comment)
                 ],  # Combine first item and repeated items, then capture comments
             )
-        ),
-        filename="",
+        )
     )  # Filename will be populated later
 
     filename: Parser[str, str] = reg(
@@ -245,8 +238,7 @@ class HledgerParsers(ParserContext, whitespace=None):
     quoted_filename: Parser[str, str] = lit('"') >> filename << lit('"')
 
     include: PositionedParser[str, Include] = positioned(
-        lit("include") >> ws >> (quoted_filename | filename) > Include,
-        filename="",
+        lit("include") >> ws >> (quoted_filename | filename) > Include
     )
 
     commodity_directive: PositionedParser[str, CommodityDirective] = positioned(
@@ -259,21 +251,18 @@ class HledgerParsers(ParserContext, whitespace=None):
                 example_amount=oneify(parts[0]),
                 comment=oneify(parts[2]),
             )
-        ),
-        filename="",
+        )
     )
 
     account_directive: PositionedParser[str, AccountDirective] = positioned(
         lit("account") >> ws >> account_name & opt(ws >> inline_comment)
-        > (lambda parts: AccountDirective(name=parts[0], comment=oneify(parts[1]))),
-        filename="",
+        > (lambda parts: AccountDirective(name=parts[0], comment=oneify(parts[1])))
     )
 
     # Alias directive: alias <PATTERN> = <TARGET_ACCOUNT>
     alias_directive: PositionedParser[str, Alias] = positioned(
         lit("alias") >> ws >> reg(r"[^\s=]+") << ws << lit("=") << ws & account_name
-        > (lambda parts: Alias(pattern=parts[0], target_account=parts[1])),
-        filename="",
+        > (lambda parts: Alias(pattern=parts[0], target_account=parts[1]))
     )
 
     # Price directive: P DATE COMMODITY UNITPRICE
@@ -289,8 +278,7 @@ class HledgerParsers(ParserContext, whitespace=None):
                 unit_price=parts[2],
                 comment=oneify(parts[3]),
             )
-        ),
-        filename="",
+        )
     )
 
     tli: PositionedParser[str, JournalEntry] = positioned((
@@ -301,7 +289,7 @@ class HledgerParsers(ParserContext, whitespace=None):
         | alias_directive
         | price_directive
         | top_comment
-    ) > JournalEntry.create, filename="")
+    ) > JournalEntry.create)
 
     # The full journal is just a repetition of top-level items (transactions or includes or etc).
     # Each top-level item is separated by one or more whitespace lines.
@@ -312,8 +300,7 @@ class HledgerParsers(ParserContext, whitespace=None):
                 # Filter out string comments before creating JournalEntry objects. Skip comments.
                 entries=[item for item in items if isinstance(item, JournalEntry)]
             )
-        ),
-        filename="",
+        )
     )
 
 
@@ -350,7 +337,7 @@ def parse_hledger_journal_content(
 ) -> Result[Journal, ParseError]:
     # Use map to handle the parsing result instead of unwrap
     return HledgerParsers.journal.parse(file_content).map(
-        lambda journal: journal.set_filename(Path(filename))
+        lambda journal: journal.set_filename(Path(filename), file_content)
     )
 
 
