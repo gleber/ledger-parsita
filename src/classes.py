@@ -152,7 +152,7 @@ class CommodityKind(Enum):
     STOCK = "STOCK"
 
 
-@dataclass
+@dataclass(eq=False)
 class Commodity(PositionAware["Commodity"]):
     """A commodity"""
 
@@ -204,6 +204,14 @@ class Commodity(PositionAware["Commodity"]):
         option_regex = re.compile(r"^[A-Z]+(?:\d{6})?[CPcp]\d+(\.\d+)?$")
         return bool(option_regex.match(self.name))
 
+    def __eq__(self, other):
+        if not isinstance(other, Commodity):
+            return NotImplemented
+        return self.name == other.name
+
+    def __hash__(self):
+        return hash(self.name)
+
 
 @dataclass
 class Amount(PositionAware["Amount"]):
@@ -218,6 +226,17 @@ class Amount(PositionAware["Amount"]):
 
     def to_journal_string(self) -> str:
         return f"{self.quantity} {self.commodity.to_journal_string()}"
+
+    def __add__(self, other: "Amount") -> "Amount":
+        if self.commodity != other.commodity:
+            raise ValueError("Cannot add amounts with different commodities")
+        return Amount(self.quantity + other.quantity, self.commodity)
+
+    def __iadd__(self, other: "Amount") -> "Amount":
+        if self.commodity != other.commodity:
+            raise ValueError("Cannot add amounts with different commodities")
+        self.quantity += other.quantity
+        return self
 
 
 @dataclass
@@ -242,7 +261,7 @@ class Cost(PositionAware["Cost"]):
         return f"{self.kind.value} {self.amount.to_journal_string()}"
 
 
-@dataclass
+@dataclass(eq=False)
 class AccountName(PositionAware["AccountName"]):
     """An account name"""
 
@@ -276,6 +295,14 @@ class AccountName(PositionAware["AccountName"]):
         if not self.parts:
             return False
         return bool(dated_account_regex.match(self.parts[-1]))
+
+    def __eq__(self, other):
+        if not isinstance(other, AccountName):
+            return NotImplemented
+        return self.parts == other.parts
+
+    def __hash__(self):
+        return hash(tuple(self.parts))
 
 
 class Status(Enum):
@@ -432,6 +459,38 @@ class Transaction(PositionAware["Transaction"]):
         )
         return (self.date, self.payee, posting_keys)
 
+    def get_asset_acquisition_posting(self) -> Optional[Posting]:
+        """Finds the asset acquisition posting in the transaction, if any."""
+        for posting in self.postings:
+            if posting.account.isAsset() and posting.account.isDatedSubaccount() and posting.amount is not None and posting.amount.quantity > 0:
+                return posting
+        return None
+
+    def get_cost_basis_posting(self, acquisition_posting: Posting) -> Optional[Posting]:
+        """Finds the cost basis posting for a given asset acquisition posting."""
+        for other_posting in self.postings:
+            # Look for a posting with a negative cash amount in any account other than the asset account being acquired
+            if (
+                other_posting != acquisition_posting
+                and other_posting.amount is not None
+                and other_posting.amount.quantity < 0
+                and other_posting.amount.commodity.isCash()
+                and other_posting.account != acquisition_posting.account # Ensure it's not the same asset account
+            ):
+                return other_posting
+        return None
+
+    def calculate_cost_basis_per_unit(self, acquisition_posting: Posting, cost_basis_posting: Posting) -> Optional[Amount]:
+        """Calculates the cost basis per unit for an asset acquisition."""
+        if acquisition_posting.amount is None or cost_basis_posting.amount is None:
+            return None # Should not happen if called after finding valid postings
+
+        if acquisition_posting.amount.quantity != 0:
+            cost_basis_per_unit_value = abs(cost_basis_posting.amount.quantity / acquisition_posting.amount.quantity)
+            return Amount(cost_basis_per_unit_value, cost_basis_posting.amount.commodity)
+        else:
+            return None # Handle zero quantity acquisition
+
 
 @dataclass
 class Include(PositionAware["Include"]):
@@ -490,27 +549,6 @@ class MarketPrice(PositionAware["MarketPrice"]):
         if self.comment:
             s += f" {self.comment.to_journal_string()}"
         return s
-
-
-@dataclass
-class File(PositionAware["File"]):
-    """A ledger file"""
-
-    path: str
-    included_files: List["File"] = field(default_factory=list)
-    source_location: Optional["SourceLocation"] = None
-
-
-@dataclass
-class Account(PositionAware["Account"]):
-    """An account in the ledger"""
-
-    name: AccountName
-    parent: Optional["Account"] = None
-    subaccounts: List["Account"] = field(default_factory=list)
-    balance_exclusive: Dict[str, Decimal] = field(default_factory=dict)
-    balance_inclusive: Dict[str, Decimal] = field(default_factory=dict)
-    source_location: Optional["SourceLocation"] = None
 
 
 @dataclass

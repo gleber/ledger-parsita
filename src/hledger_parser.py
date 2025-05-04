@@ -24,7 +24,6 @@ from src.classes import (
     Tag,
     Status,
     AccountDirective,
-    File,
     JournalEntry,
     Journal,
     SourceLocation,
