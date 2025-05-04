@@ -70,6 +70,20 @@ include journal_b.journal"""
 
     assert output == expected_output.strip()
 
+def test_cli_balance_command_taxes_journal():
+    """Tests that the balance CLI command succeeds for examples/taxes/all.journal."""
+    taxes_journal_path = Path("examples/taxes/all.journal")
+
+    result = subprocess.run(
+        ["python", "-m", "src.main", "balance", str(taxes_journal_path)],
+        capture_output=True,
+        text=True,
+        check=False,  # Do not raise an exception for non-zero exit codes
+    )
+
+    # Assert that the command exited successfully (return code 0)
+    assert result.returncode == 0
+
 def test_cli_print_command_flat():
     main_journal_path = TEST_INCLUDES_DIR / "main.journal"
     expected_output = """2023-01-15 Payee Main 1

@@ -18,6 +18,8 @@ This document tracks the progress, completed features, and remaining tasks for l
 - The `isDatedSubaccount` method was found to be already implemented and tested in `src/classes.py`.
 - Added CLI command `find-positions` to find open and close transactions.
 - **Tests in `tests/test_classes.py`, `tests/test_journal_flattening.py`, and `tests/test_main.py` have been refactored to pytest style and are passing.**
+- **Implemented a caching mechanism for `set_filename` and `_calculate_line_column` to improve parsing performance.**
+- **Resolved import and attribute errors encountered during the implementation and testing of the caching mechanism.**
 
 ## What's Left to Build
 
@@ -31,9 +33,8 @@ This document tracks the progress, completed features, and remaining tasks for l
 
 ## Current Status
 
-- The project's main goal has shifted to implementing the capital gains tracking tool.
-- Initial planning for the capital gains tracking tool is underway, reflected in the updated memory bank files.
-- The refactoring of key test files to pytest is complete and the tests are passing.
+- The project's main goal is implementing the capital gains tracking tool.
+- The performance optimization for source position lookups during parsing has been completed and verified by passing tests.
 
 ## Known Issues
 
@@ -45,3 +46,4 @@ This document tracks the progress, completed features, and remaining tasks for l
 - The decision to use `parsita` for parsing has been made.
 - **The main project focus is now on implementing the capital gains tracking tool using dated subaccounts and FIFO logic.**
 - **Adopted pytest as the testing framework and refactored existing tests.**
+- **Implemented an in-memory caching mechanism for source position lookups to improve parsing performance.**

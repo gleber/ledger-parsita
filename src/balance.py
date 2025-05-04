@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Dict, List
 
@@ -12,38 +12,82 @@ class Lot:
     cost_basis_per_unit: Amount # Cost per unit in the transaction currency
     original_posting: Posting # Reference to the posting that created this lot
 
-# Type aliases for clarity
-Balance = Dict[Commodity, Amount]
-BalanceSheet = Dict[AccountName, Balance]
-AssetLots = Dict[AccountName, List[Lot]]
+@dataclass
+class Balance:
+    """Represents the balance of a single commodity within an account, including lots."""
+    commodity: Commodity
+    total_amount: Amount = field(default_factory=lambda: Amount(Decimal(0), Commodity(""))) # Initialize with zero amount
+    lots: List[Lot] = field(default_factory=list)
 
-def calculate_balances_and_lots(transactions: List[Transaction]) -> tuple[BalanceSheet, AssetLots]:
+    def __iadd__(self, other: Amount) -> 'Balance':
+        """In-place addition for updating total_amount."""
+        if self.total_amount.commodity.name == "": # Handle initial zero amount
+             self.total_amount = Amount(self.total_amount.quantity + other.quantity, other.commodity)
+        elif self.total_amount.commodity != other.commodity:
+            raise ValueError("Cannot add amounts of different commodities")
+        else:
+            self.total_amount += other
+        return self
+
+@dataclass
+class Account:
+    """Represents an account with balances for different commodities."""
+    name: AccountName
+    balances: Dict[Commodity, Balance] = field(default_factory=dict)
+
+    def get_balance(self, commodity: Commodity) -> Balance:
+        """Gets or creates a Balance object for a given commodity."""
+        if commodity not in self.balances:
+            self.balances[commodity] = Balance(commodity=commodity)
+        return self.balances[commodity]
+
+    def add_lot(self, commodity: Commodity, lot: Lot):
+        """Adds a lot to the balance of a specific commodity."""
+        balance = self.get_balance(commodity)
+        balance.lots.append(lot)
+
+@dataclass
+class BalanceSheet:
+    """Represents the balance sheet with accounts and their balances."""
+    accounts: Dict[AccountName, Account] = field(default_factory=dict)
+
+    def get_account(self, account_name: AccountName) -> Account:
+        """Gets or creates an Account object for a given account name."""
+        if account_name not in self.accounts:
+            self.accounts[account_name] = Account(name=account_name)
+        return self.accounts[account_name]
+
+    def update_balance(self, account_name: AccountName, amount: Amount):
+        """Updates the balance of a specific commodity in an account."""
+        account = self.get_account(account_name)
+        balance = account.get_balance(amount.commodity)
+        balance += amount
+
+    def add_lot_to_account(self, account_name: AccountName, commodity: Commodity, lot: Lot):
+        """Adds a lot to a specific commodity balance within an account."""
+        account = self.get_account(account_name)
+        account.add_lot(commodity, lot)
+
+
+def calculate_balances_and_lots(transactions: List[Transaction]) -> BalanceSheet:
     """
-    Calculates the balance of each account and tracks asset lots.
+    Calculates the balance of each account and tracks asset lots, returning a BalanceSheet.
 
     Args:
         transactions: A list of Transaction objects.
 
     Returns:
-        A tuple containing the BalanceSheet and AssetLots.
+        A BalanceSheet containing accounts, their balances, and associated lots.
     """
-    balance_sheet: BalanceSheet = {}
-    asset_lots: AssetLots = {}
+    balance_sheet = BalanceSheet()
 
     for transaction in transactions:
         for posting in transaction.postings:
             account_name = posting.account
             amount = posting.amount
 
-            # Update BalanceSheet
-            if account_name not in balance_sheet:
-                balance_sheet[account_name] = {}
-
-            if amount is not None: # Check for None
-                if amount.commodity not in balance_sheet[account_name]:
-                    balance_sheet[account_name][amount.commodity] = Amount(Decimal(0), amount.commodity)
-
-                balance_sheet[account_name][amount.commodity] += amount
+            if amount is not None:
+                balance_sheet.update_balance(account_name, amount)
 
         # After processing all postings in a transaction, check for asset acquisitions and track lots
         acquisition_posting = transaction.get_asset_acquisition_posting()
@@ -71,9 +115,7 @@ def calculate_balances_and_lots(transactions: List[Transaction]) -> tuple[Balanc
                     )
 
                     account_name = acquisition_posting.account # Get account name from acquisition posting
-                    if account_name not in asset_lots:
-                        asset_lots[account_name] = []
-                    asset_lots[account_name].append(lot)
+                    balance_sheet.add_lot_to_account(account_name, acquisition_posting.amount.commodity, lot)
 
 
-    return balance_sheet, asset_lots
+    return balance_sheet

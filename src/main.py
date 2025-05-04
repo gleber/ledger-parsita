@@ -310,24 +310,17 @@ def balance_cmd(filename: Path):
             flattened_journal = journal.flatten()
             # Extract only Transaction objects from the flattened entries
             transactions_only = [entry.transaction for entry in flattened_journal.entries if entry.transaction is not None]
-            balance_sheet, asset_lots = calculate_balances_and_lots(transactions_only)
+            balance_sheet = calculate_balances_and_lots(transactions_only)
 
             # Format and print the balance sheet
             click.echo("Current Balances:")
             # Sort accounts alphabetically
-            for account_name in sorted(balance_sheet.keys(), key=lambda x: str(x)):
-                click.echo(f"{account_name}")
+            for account_name in sorted(balance_sheet.accounts.keys(), key=lambda x: str(x)):
+                account = balance_sheet.get_account(account_name)
+                click.echo(f"{account.name}")
                 # Sort commodities alphabetically within each account
-                for commodity, amount in sorted(balance_sheet[account_name].items(), key=lambda x: str(x[0])):
-                    click.echo(f"  {amount}")
-            
-            # Optionally, print asset lots as well (can be removed later if not needed for this command)
-            # click.echo("\nAsset Lots:")
-            # for account_name in sorted(asset_lots.keys(), key=lambda x: str(x)):
-            #     click.echo(f"{account_name}:")
-            #     for lot in asset_lots[account_name]:
-            #         click.echo(f"  {lot.quantity} acquired on {lot.acquisition_date} at {lot.cost_basis_per_unit}")
-
+                for commodity, balance in sorted(account.balances.items(), key=lambda x: str(x[0])):
+                    click.echo(f"  {balance.total_amount}")
 
     exit(0)
 

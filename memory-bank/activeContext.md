@@ -4,7 +4,8 @@ This document outlines the current focus and active considerations for ledger-pa
 
 ## Current Work Focus
 
-- Planning and implementing the capital gains tracking tool.
+- Implementing the capital gains tracking tool.
+- Completed performance optimization for source position lookups during parsing.
 
 ## Recent Changes
 
@@ -29,6 +30,10 @@ This document outlines the current focus and active considerations for ledger-pa
 - Added a test case for the `find-positions` command in `tests/test_main.py`.
 - Created `tests/includes/journal_positions.journal` for testing the `find-positions` command.
 - Refactored tests in `tests/test_classes.py`, `tests/test_journal_flattening.py`, and `tests/test_main.py` from `unittest` to `pytest` style.
+- **Implemented a caching mechanism for `set_filename` and `_calculate_line_column` using a `SourceCacheManager` in `src/classes.py` to improve parsing performance for large journals with includes.**
+- **Modified `PositionAware.set_filename` to use the `SourceCacheManager` for efficient line/column calculation.**
+- **Resolved an `ImportError` in `tests/test_filtering.py` and an `AttributeError` in `SourceCacheManager` during testing.**
+- **Changed `SourceCacheManager` to use `__init__` instead of `__new__` while keeping the global instance, as requested.**
 
 ## Next Steps
 
@@ -45,14 +50,18 @@ This document outlines the current focus and active considerations for ledger-pa
 
 - How to best represent the parsed hledger data structure in Python.
 - Design of the filtering API.
+- Implementation details of the in-memory caching for source position lookups.
 
 ## Important Patterns and Preferences
 
 - Adhere to Python best practices and maintainable code.
 - Prioritize accurate parsing and robust error handling.
+- Utilize the implemented caching mechanism for efficient source position lookups.
 
 ## Learnings and Project Insights
 
 - The project involves parsing a domain-specific language (hledger journal format).
 - The parsing process will require careful handling of various transaction and posting types.
 - Successfully refactored existing `unittest` tests to `pytest` style, improving test readability and maintainability.
+- Gained experience in implementing and integrating in-memory caching for performance optimization.
+- Encountered and resolved issues related to file path handling and import mechanisms during development.
