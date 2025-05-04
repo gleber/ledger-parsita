@@ -1,59 +1,49 @@
 import re
-import unittest
 import subprocess
 from pathlib import Path
+import pytest
 
 TEST_INCLUDES_DIR = Path("tests/includes")
 
+def test_cli_flat_option():
+    main_journal_path = TEST_INCLUDES_DIR / "main.journal"
+    # Use subprocess to run the main.py script with the --flat option
+    result = subprocess.run(
+        ["python", "-m", "src.main", "pprint", "--flat", str(main_journal_path)],
+        capture_output=True,
+        text=True,
+        check=True,  # Raise an exception if the command fails
+    )
+    output = result.stdout
 
-class TestMain(unittest.TestCase):
-    def test_cli_flat_option(self):
-        main_journal_path = TEST_INCLUDES_DIR / "main.journal"
-        # Use subprocess to run the main.py script with the --flat option
-        import subprocess
+    # Basic check: ensure the output contains expected elements from flattened journal
+    assert "Payee Main 1" in output
+    assert "Payee A" in output
+    assert "Payee Main 2" in output
+    assert "Payee C" in output
+    assert "Payee B" in output
+    # Ensure include directives are NOT in the flattened output
+    assert "include journal_a.journal" not in output
+    assert "include journal_b.journal" not in output
+    assert "include journal_c.journal" not in output
 
-        result = subprocess.run(
-            ["python", "-m", "src.main", "pprint", "--flat", str(main_journal_path)],
-            capture_output=True,
-            text=True,
-            check=True,  # Raise an exception if the command fails
-        )
-        output = result.stdout
+def test_cli_strip_option():
+    main_journal_path = TEST_INCLUDES_DIR / "main.journal"
+    # Use subprocess to run the main.py script with the --strip option
+    result = subprocess.run(
+        ["python", "-m", "src.main", "pprint", "--strip", str(main_journal_path)],
+        capture_output=True,
+        text=True,
+        check=True,  # Raise an exception if the command fails
+    )
+    output = result.stdout
 
-        # Basic check: ensure the output contains expected elements from flattened journal
-        self.assertIn("Payee Main 1", output)
-        self.assertIn("Payee A", output)
-        self.assertIn("Payee Main 2", output)
-        self.assertIn("Payee C", output)
-        self.assertIn("Payee B", output)
-        # Ensure include directives are NOT in the flattened output
-        self.assertNotIn("include journal_a.journal", output)
-        self.assertNotIn("include journal_b.journal", output)
-        self.assertNotIn("include journal_c.journal", output)
+    location_pattern = re.compile(r"SourceLocation")
+    assert location_pattern.search(output) is None, "Location information found in stripped output"
 
-    def test_cli_strip_option(self):
-        main_journal_path = TEST_INCLUDES_DIR / "main.journal"
-        # Use subprocess to run the main.py script with the --strip option
-        import subprocess
-
-        result = subprocess.run(
-            ["python", "-m", "src.main", "pprint", "--strip", str(main_journal_path)],
-            capture_output=True,
-            text=True,
-            check=True,  # Raise an exception if the command fails
-        )
-        output = result.stdout
-
-        location_pattern = re.compile(r"SourceLocation")
-        self.assertIsNone(
-            location_pattern.search(output),
-            "Location information found in stripped output",
-        )
-
-    def test_cli_print_command(self):
-        self.maxDiff = None
-        main_journal_path = TEST_INCLUDES_DIR / "main.journal"
-        expected_output = f"""; {main_journal_path.absolute()}:0:67
+def test_cli_print_command():
+    main_journal_path = TEST_INCLUDES_DIR / "main.journal"
+    expected_output = f"""; {main_journal_path.absolute()}:0:67
 2023-01-15 Payee Main 1
   Assets:Cash  10.00 $
   Income:Job  -10.00 $
@@ -68,22 +58,21 @@ include journal_a.journal
 
 ; {main_journal_path.absolute()}:173:27
 include journal_b.journal"""
-        result = subprocess.run(
-            ["python", "-m", "src.main", "print", str(main_journal_path)],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        output = (
-            result.stdout.strip()
-        )  # Strip leading/trailing whitespace for comparison
+    result = subprocess.run(
+        ["python", "-m", "src.main", "print", str(main_journal_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    output = (
+        result.stdout.strip()
+    )  # Strip leading/trailing whitespace for comparison
 
-        self.assertEqual(output, expected_output.strip())
+    assert output == expected_output.strip()
 
-    def test_cli_print_command_flat(self):
-        self.maxDiff = None
-        main_journal_path = TEST_INCLUDES_DIR / "main.journal"
-        expected_output = """2023-01-15 Payee Main 1
+def test_cli_print_command_flat():
+    main_journal_path = TEST_INCLUDES_DIR / "main.journal"
+    expected_output = """2023-01-15 Payee Main 1
   Assets:Cash  10.00 $
   Income:Job  -10.00 $
 
@@ -114,28 +103,27 @@ include journal_b.journal"""
   Expenses:Rent  -2.00 $
 
 ; end include journal_b.journal"""
-        result = subprocess.run(
-            [
-                "python",
-                "-m",
-                "src.main",
-                "print",
-                "--flat",
-                "--strip",
-                str(main_journal_path),
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        output = result.stdout.strip()
+    result = subprocess.run(
+        [
+            "python",
+            "-m",
+            "src.main",
+            "print",
+            "--flat",
+            "--strip",
+            str(main_journal_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    output = result.stdout.strip()
 
-        self.assertEqual(output, expected_output.strip())
+    assert output == expected_output.strip()
 
-    def test_cli_print_command_strip(self):
-        self.maxDiff = None
-        main_journal_path = TEST_INCLUDES_DIR / "main.journal"
-        expected_output = """2023-01-15 Payee Main 1
+def test_cli_print_command_strip():
+    main_journal_path = TEST_INCLUDES_DIR / "main.journal"
+    expected_output = """2023-01-15 Payee Main 1
   Assets:Cash  10.00 $
   Income:Job  -10.00 $
 
@@ -146,55 +134,53 @@ include journal_a.journal
   Expenses:Utilities  -5.00 $
 
 include journal_b.journal"""
-        result = subprocess.run(
-            ["python", "-m", "src.main", "print", "--strip", str(main_journal_path)],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        output = result.stdout.strip()
+    result = subprocess.run(
+        ["python", "-m", "src.main", "print", "--strip", str(main_journal_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    output = result.stdout.strip()
 
-        self.assertEqual(output, expected_output.strip())
+    assert output == expected_output.strip()
 
-    def test_cli_find_positions_command(self):
-        self.maxDiff = None
-        positions_journal_path = TEST_INCLUDES_DIR / "journal_positions.journal"
-        expected_output_lines = [
-            # "Successfully parsed ..." is on stderr, not on stdout
-            "",
-            "Opening Transactions:",
-            "- 2023-01-01 Opening Transaction 1 (Line 0)",
-            "- 2023-01-15 Opening Transaction 2 (Line 132)",
-            "",
-            "Closing Transactions:",
-            "- 2023-02-01 Closing Transaction 1 (Partial) (Line 264)",
-            "- 2023-03-15 Closing Transaction 2 (Full) (Line 521)",
-        ]
-        expected_output = "\n".join(expected_output_lines)
+def test_cli_find_positions_command():
+    positions_journal_path = TEST_INCLUDES_DIR / "journal_positions.journal"
+    expected_output_lines = [
+        # "Successfully parsed ..." is on stderr, not on stdout
+        "",
+        "Opening Transactions:",
+        "- 2023-01-01 Opening Transaction 1 (Line 0)",
+        "- 2023-01-15 Opening Transaction 2 (Line 132)",
+        "",
+        "Closing Transactions:",
+        "- 2023-02-01 Closing Transaction 1 (Partial) (Line 264)",
+        "- 2023-03-15 Closing Transaction 2 (Full) (Line 521)",
+    ]
+    expected_output = "\n".join(expected_output_lines)
 
-        result = subprocess.run(
-            ["python", "-m", "src.main", "find-positions", str(positions_journal_path)],
-            capture_output=True,
-            text=True,
-            check=True,  # Raise an exception if the command fails
-        )
-        output = result.stdout
+    result = subprocess.run(
+        ["python", "-m", "src.main", "find-positions", str(positions_journal_path)],
+        capture_output=True,
+        text=True,
+        check=True,  # Raise an exception if the command fails
+    )
+    output = result.stdout
 
-        # Split output and expected output into lines for more robust comparison
-        output_lines = output.splitlines()
-        expected_output_lines_stripped = [
-            line.strip() for line in expected_output_lines
-        ]
-        output_lines_stripped = [line.strip() for line in output_lines]
+    # Split output and expected output into lines for more robust comparison
+    output_lines = output.splitlines()
+    expected_output_lines_stripped = [
+        line.strip() for line in expected_output_lines
+    ]
+    output_lines_stripped = [line.strip() for line in output_lines]
 
-        # Compare line by line, ignoring potential differences in whitespace at the end of lines
-        self.assertEqual(len(output_lines_stripped), len(expected_output_lines_stripped))
-        self.assertEqual(output_lines_stripped, expected_output_lines_stripped)
+    # Compare line by line, ignoring potential differences in whitespace at the end of lines
+    assert len(output_lines_stripped) == len(expected_output_lines_stripped)
+    assert output_lines_stripped == expected_output_lines_stripped
 
-    def test_cli_balance_command(self):
-        self.maxDiff = None
-        balance_journal_path = TEST_INCLUDES_DIR / "test_balance.journal"
-        expected_output = """Current Balances:
+def test_cli_balance_command():
+    balance_journal_path = TEST_INCLUDES_DIR / "test_balance.journal"
+    expected_output = """Current Balances:
 assets:bank
   -1850 USD
 assets:broker:AAPL:20230120
@@ -214,16 +200,12 @@ income:salary
 liabilities:credit-card
   -50 EUR"""
 
-        result = subprocess.run(
-            ["python", "-m", "src.main", "balance", str(balance_journal_path)],
-            capture_output=True,
-            text=True,
-            check=True,  # Raise an exception if the command fails
-        )
-        output = result.stdout.strip()
+    result = subprocess.run(
+        ["python", "-m", "src.main", "balance", str(balance_journal_path)],
+        capture_output=True,
+        text=True,
+        check=True,  # Raise an exception if the command fails
+    )
+    output = result.stdout.strip()
 
-        self.assertEqual(output, expected_output.strip())
-
-
-if __name__ == "__main__":
-    unittest.main()
+    assert output == expected_output.strip()
