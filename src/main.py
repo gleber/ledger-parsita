@@ -11,8 +11,9 @@ from src.classes import Journal, JournalEntry
 import re
 from parsita import ParseError
 from src.classes import Posting, Transaction, sl
-from returns.result import Result, Success, Failure # Add import at the beginning
+from returns.result import Result, Success, Failure
 from src.capital_gains import find_open_transactions, find_close_transactions
+from src.balance import calculate_balances_and_lots # Import calculate_balances_and_lots
 from returns.pipeline import (flow)
 from returns.pointfree import (bind)
 
@@ -168,12 +169,12 @@ def find_capgain_non_crypto_txs(journal: Journal) -> list[Transaction]:
 
 
 
-# Define the find-non-dated-opens command
+# Define the capgains command
 @cli.command("capgains")
 @click.argument(
     "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
 )
-def find_non_dated_opens_cmd(filename: Path):
+def capgains_cmd(filename: Path):
     """Finds transactions opening positions using non-dated subaccounts."""
     result: Result[Journal, ValueError] = flow(
         str(filename.absolute()),
@@ -283,6 +284,50 @@ def find_positions_cmd(filename: Path):
             click.echo(f"- {transaction.date} {transaction.payee} {line_info}")
     else:
         click.echo("\nNo closing transactions found.")
+
+    exit(0)
+
+
+# Define the balance command
+@cli.command("balance")
+@click.argument(
+    "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
+)
+def balance_cmd(filename: Path):
+    """Calculates and prints the current balance of all accounts."""
+    result: Result[Journal, ValueError] = flow(
+        str(filename.absolute()),
+        parse_hledger_journal,
+        bind(lambda journal: parse_filter_strip(journal, True, False, None))
+    )
+
+    match result:
+        case Failure(error):
+            print(f"Error parsing journal file: {error}")
+            exit(1)
+        case Success(journal):
+            # Flatten the journal to ensure all transactions are processed for balance
+            flattened_journal = journal.flatten()
+            # Extract only Transaction objects from the flattened entries
+            transactions_only = [entry.transaction for entry in flattened_journal.entries if entry.transaction is not None]
+            balance_sheet, asset_lots = calculate_balances_and_lots(transactions_only)
+
+            # Format and print the balance sheet
+            click.echo("Current Balances:")
+            # Sort accounts alphabetically
+            for account_name in sorted(balance_sheet.keys(), key=lambda x: str(x)):
+                click.echo(f"{account_name}")
+                # Sort commodities alphabetically within each account
+                for commodity, amount in sorted(balance_sheet[account_name].items(), key=lambda x: str(x[0])):
+                    click.echo(f"  {amount}")
+            
+            # Optionally, print asset lots as well (can be removed later if not needed for this command)
+            # click.echo("\nAsset Lots:")
+            # for account_name in sorted(asset_lots.keys(), key=lambda x: str(x)):
+            #     click.echo(f"{account_name}:")
+            #     for lot in asset_lots[account_name]:
+            #         click.echo(f"  {lot.quantity} acquired on {lot.acquisition_date} at {lot.cost_basis_per_unit}")
+
 
     exit(0)
 

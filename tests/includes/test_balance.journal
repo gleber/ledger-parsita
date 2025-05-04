@@ -1,0 +1,27 @@
+2023-01-01 Initial Balance
+  assets:cash  1000 USD
+  equity:opening-balances  -1000 USD
+
+2023-01-05 Groceries
+  expenses:food  20 USD
+  assets:cash  -20 USD
+
+2023-01-10 Income
+  assets:bank  500 USD
+  income:salary  -500 USD
+
+2023-01-15 Transfer
+  assets:bank  -100 USD
+  assets:cash  100 USD
+
+2023-01-20 Stock Purchase
+  assets:broker:AAPL:20230120  5 AAPL
+  assets:bank  -750 USD
+
+2023-01-25 Another Stock Purchase
+  assets:broker:GOOG:20230125  10 GOOG
+  assets:bank  -1500 USD
+
+2023-01-30 Expense in EUR
+  expenses:travel  50 EUR
+  liabilities:credit-card  -50 EUR

@@ -191,6 +191,39 @@ include journal_b.journal"""
         self.assertEqual(len(output_lines_stripped), len(expected_output_lines_stripped))
         self.assertEqual(output_lines_stripped, expected_output_lines_stripped)
 
+    def test_cli_balance_command(self):
+        self.maxDiff = None
+        balance_journal_path = TEST_INCLUDES_DIR / "test_balance.journal"
+        expected_output = """Current Balances:
+assets:bank
+  -1850 USD
+assets:broker:AAPL:20230120
+  5 AAPL
+assets:broker:GOOG:20230125
+  10 GOOG
+assets:cash
+  1080 USD
+equity:opening-balances
+  -1000 USD
+expenses:food
+  20 USD
+expenses:travel
+  50 EUR
+income:salary
+  -500 USD
+liabilities:credit-card
+  -50 EUR"""
+
+        result = subprocess.run(
+            ["python", "-m", "src.main", "balance", str(balance_journal_path)],
+            capture_output=True,
+            text=True,
+            check=True,  # Raise an exception if the command fails
+        )
+        output = result.stdout.strip()
+
+        self.assertEqual(output, expected_output.strip())
+
 
 if __name__ == "__main__":
     unittest.main()
