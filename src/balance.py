@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Dict, List
+from typing import Dict, List, Union
 
 from src.classes import AccountName, Amount, Commodity, Posting, Transaction, CostKind
 
@@ -14,37 +14,77 @@ class Lot:
 
 @dataclass
 class Balance:
-    """Represents the balance of a single commodity within an account, including lots."""
+    """Base class for account balances."""
     commodity: Commodity
     total_amount: Amount = field(default_factory=lambda: Amount(Decimal(0), Commodity(""))) # Initialize with zero amount
+
+@dataclass
+class CashBalance(Balance):
+    """Represents the balance of a cash or cryptocurrency commodity within an account."""
+    # Inherits commodity and total_amount from Balance
+    pass
+
+@dataclass
+class AssetBalance(Balance):
+    """Represents the balance of a stock or option commodity within an account, including lots."""
+    # Inherits commodity and total_amount from Balance
+    cost_basis_per_unit: Amount = field(default_factory=lambda: Amount(Decimal(0), Commodity(""))) # Initialize with zero amount
     lots: List[Lot] = field(default_factory=list)
 
-    def __iadd__(self, other: Amount) -> 'Balance':
-        """In-place addition for updating total_amount."""
-        if self.total_amount.commodity.name == "": # Handle initial zero amount
-             self.total_amount = Amount(self.total_amount.quantity + other.quantity, other.commodity)
-        elif self.total_amount.commodity != other.commodity:
-            raise ValueError("Cannot add amounts of different commodities")
+    def add_lot(self, lot: Lot):
+        """Adds a lot to this AssetBalance and incrementally recalculates total_amount and cost_basis_per_unit."""
+        if lot.quantity.commodity != self.commodity:
+            raise ValueError("Lot commodity must match Balance commodity")
+
+        # Calculate the new total quantity and total cost
+        current_total_quantity = self.total_amount.quantity if self.total_amount.commodity == self.commodity else Decimal(0)
+        current_total_cost = current_total_quantity * self.cost_basis_per_unit.quantity if self.cost_basis_per_unit and self.cost_basis_per_unit.commodity.name != "" else Decimal(0)
+
+        new_total_quantity = current_total_quantity + lot.quantity.quantity
+        new_total_cost = current_total_cost + (lot.quantity.quantity * lot.cost_basis_per_unit.quantity if lot.cost_basis_per_unit else Decimal(0))
+
+        # Update total_amount
+        self.total_amount = Amount(new_total_quantity, self.commodity)
+
+        # Update cost_basis_per_unit (weighted average)
+        if new_total_quantity != 0:
+            cost_commodity = lot.cost_basis_per_unit.commodity if lot.cost_basis_per_unit else (self.cost_basis_per_unit.commodity if self.cost_basis_per_unit.commodity.name != "" else Commodity(""))
+            self.cost_basis_per_unit = Amount(new_total_cost / new_total_quantity, cost_commodity)
         else:
-            self.total_amount += other
-        return self
+            self.cost_basis_per_unit = Amount(Decimal(0), self.cost_basis_per_unit.commodity if self.cost_basis_per_unit.commodity.name != "" else Commodity("")) # Handle zero quantity
+
+        self.lots.append(lot)
+
 
 @dataclass
 class Account:
     """Represents an account with balances for different commodities."""
     name: AccountName
-    balances: Dict[Commodity, Balance] = field(default_factory=dict)
+    balances: Dict[Commodity, Union[CashBalance, AssetBalance]] = field(default_factory=dict)
 
-    def get_balance(self, commodity: Commodity) -> Balance:
-        """Gets or creates a Balance object for a given commodity."""
+    def get_balance(self, commodity: Commodity) -> Union[CashBalance, AssetBalance]:
+        """Gets or creates a Balance subclass object for a given commodity based on its type."""
         if commodity not in self.balances:
-            self.balances[commodity] = Balance(commodity=commodity)
+            # Determine the type of Balance to create based on commodity type
+            if commodity.isCash() or commodity.isCrypto(): # Assuming isCrypto() method exists or similar logic
+                self.balances[commodity] = CashBalance(commodity=commodity)
+            elif commodity.isStock() or commodity.isOption(): # Assuming isStock() and isOption() methods exist or similar logic
+                 # Initialize AssetBalance with zero total_amount and cost_basis_per_unit
+                self.balances[commodity] = AssetBalance(commodity=commodity, total_amount=Amount(Decimal(0), commodity), cost_basis_per_unit=Amount(Decimal(0), Commodity("")))
+            else:
+                # Default to CashBalance for unknown types or raise an error
+                self.balances[commodity] = CashBalance(commodity=commodity) # Or raise ValueError(f"Unsupported commodity type: {commodity.name}")
+
         return self.balances[commodity]
 
     def add_lot(self, commodity: Commodity, lot: Lot):
-        """Adds a lot to the balance of a specific commodity."""
+        """Adds a lot to the balance of a specific commodity (must be an AssetBalance)."""
         balance = self.get_balance(commodity)
-        balance.lots.append(lot)
+        if isinstance(balance, AssetBalance):
+            balance.add_lot(lot)
+        else:
+            raise TypeError(f"Cannot add lot to non-asset balance for commodity: {commodity.name}")
+
 
 @dataclass
 class BalanceSheet:
@@ -58,13 +98,22 @@ class BalanceSheet:
         return self.accounts[account_name]
 
     def update_balance(self, account_name: AccountName, amount: Amount):
-        """Updates the balance of a specific commodity in an account."""
+        """Updates the balance of a specific commodity in an account (only for CashBalance)."""
         account = self.get_account(account_name)
         balance = account.get_balance(amount.commodity)
-        balance += amount
+        if isinstance(balance, CashBalance):
+             # Explicitly add amount quantity to total_amount quantity for CashBalance
+            if balance.total_amount.commodity.name == "": # Handle initial zero amount
+                 balance.total_amount = Amount(balance.total_amount.quantity + amount.quantity, amount.commodity)
+            elif balance.total_amount.commodity != amount.commodity:
+                raise ValueError("Cannot add amounts of different commodities")
+            else:
+                balance.total_amount.quantity += amount.quantity
+        # For AssetBalance, total_amount is updated when lots are added, not by postings here
+
 
     def add_lot_to_account(self, account_name: AccountName, commodity: Commodity, lot: Lot):
-        """Adds a lot to a specific commodity balance within an account."""
+        """Adds a lot to a specific commodity balance within an account (must be an AssetBalance)."""
         account = self.get_account(account_name)
         account.add_lot(commodity, lot)
 
@@ -86,8 +135,22 @@ def calculate_balances_and_lots(transactions: List[Transaction]) -> BalanceSheet
             account_name = posting.account
             amount = posting.amount
 
+            # Ensure the account exists in the balance sheet
+            account = balance_sheet.get_account(account_name)
+
             if amount is not None:
-                balance_sheet.update_balance(account_name, amount)
+                # Ensure the balance for the commodity exists and update if it's a CashBalance
+                balance = account.get_balance(amount.commodity)
+                if isinstance(balance, CashBalance):
+                    # Explicitly add amount to total_amount for CashBalance
+                    if balance.total_amount.commodity.name == "": # Handle initial zero amount
+                         balance.total_amount = Amount(balance.total_amount.quantity + amount.quantity, amount.commodity)
+                    elif balance.total_amount.commodity != amount.commodity:
+                        raise ValueError("Cannot add amounts of different commodities")
+                    else:
+                        balance.total_amount.quantity += amount.quantity
+                # For AssetBalance, total_amount is updated when lots are added, not by postings here
+
 
         # After processing all postings in a transaction, check for asset acquisitions and track lots
         acquisition_posting = transaction.get_asset_acquisition_posting()

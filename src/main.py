@@ -317,6 +317,8 @@ def balance_cmd(filename: Path):
             # Sort accounts alphabetically
             for account_name in sorted(balance_sheet.accounts.keys(), key=lambda x: str(x)):
                 account = balance_sheet.get_account(account_name)
+                if not account.isAsset():
+                    continue
                 click.echo(f"{account.name}")
                 # Sort commodities alphabetically within each account
                 for commodity, balance in sorted(account.balances.items(), key=lambda x: str(x[0])):
