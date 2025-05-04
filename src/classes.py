@@ -664,6 +664,16 @@ class Journal(PositionAware["Journal"]):
     entries: List[JournalEntry] = field(default_factory=list)
     source_location: Optional["SourceLocation"] = None
 
+    def set_filename(self, filename: Path, file_content: str) -> Self:
+        # return Self with updated source_location for each entry
+        return replace(
+            self,
+            entries=[
+                entry.set_filename(filename, file_content) for entry in self.entries
+            ],
+            source_location=SourceLocation(filename=filename, offset=0, length=0),
+        )        
+
     def __len__(self):
         return len(self.entries)
 

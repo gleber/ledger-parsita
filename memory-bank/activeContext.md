@@ -28,6 +28,7 @@ This document outlines the current focus and active considerations for ledger-pa
 - Added the `find-positions` CLI command to `src/main.py` to find open and close transactions.
 - Added a test case for the `find-positions` command in `tests/test_main.py`.
 - Created `tests/includes/journal_positions.journal` for testing the `find-positions` command.
+- Refactored tests in `tests/test_classes.py`, `tests/test_journal_flattening.py`, and `tests/test_main.py` from `unittest` to `pytest` style.
 
 ## Next Steps
 
@@ -54,3 +55,4 @@ This document outlines the current focus and active considerations for ledger-pa
 
 - The project involves parsing a domain-specific language (hledger journal format).
 - The parsing process will require careful handling of various transaction and posting types.
+- Successfully refactored existing `unittest` tests to `pytest` style, improving test readability and maintainability.

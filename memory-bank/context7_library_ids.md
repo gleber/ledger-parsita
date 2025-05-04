@@ -4,3 +4,4 @@ This document stores the resolved Context7-compatible library IDs for libraries 
 
 - Parsita: `/drhagen/parsita`
 - Returns: `/dry-python/returns`
+- Pytest: `/pytest-dev/pytest`

@@ -5,6 +5,7 @@ This document details the technologies, development setup, and dependencies for 
 ## Technologies Used
 
 - Python: The primary programming language.
+- Pytest: Used for writing and running tests.
 
 ## Development Setup
 
@@ -15,6 +16,8 @@ This document details the technologies, development setup, and dependencies for 
 
 - Dependencies are managed via `devenv.nix`.
 - `parsita` is used for parsing.
+- `returns` is used for error handling.
+- `pytest` is used for testing.
 - **No new major dependencies are anticipated for the initial capital gains tracking implementation, building on existing libraries.**
 
 ## Tool Usage Patterns

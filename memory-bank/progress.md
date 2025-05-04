@@ -13,11 +13,11 @@ This document tracks the progress, completed features, and remaining tasks for l
 - Added tests for capital gains functions using `isAsset()` in `tests/test_capital_gains.py`.
 - Added `getKey()` method to `Transaction` and used it in capital gains functions for tracking seen transactions.
 - Refactored capital gains finding functions using a higher-order function to deduplicate logic.
-- Attempted to fix failing capital gains tests, but the cause of the failures is unclear and may be related to test data or environment issues.
 - Added `isCash()` method to `Commodity` class and used it in `capital_gains.py` to exclude cash-only transactions.
 - Added tests to `tests/test_capital_gains.py` to ensure cash transactions are excluded.
 - The `isDatedSubaccount` method was found to be already implemented and tested in `src/classes.py`.
-- **All currently implemented tests are passing (including fixes for journal flattening and journal string conversion).**
+- Added CLI command `find-positions` to find open and close transactions.
+- **Tests in `tests/test_classes.py`, `tests/test_journal_flattening.py`, and `tests/test_main.py` have been refactored to pytest style and are passing.**
 
 ## What's Left to Build
 
@@ -28,14 +28,12 @@ This document tracks the progress, completed features, and remaining tasks for l
 - Ensure comprehensive test coverage for all filtering scenarios and edge cases.
 - Implement additional filter types if needed (future).
 - Develop other reporting features (future).
-- Added CLI command `find-positions` to find open and close transactions.
 
 ## Current Status
 
 - The project's main goal has shifted to implementing the capital gains tracking tool.
 - Initial planning for the capital gains tracking tool is underway, reflected in the updated memory bank files.
-- Added tests for `AccountName.isAsset()` and related capital gains functions, but some tests are currently failing. The cause is unclear and requires further investigation, potentially related to test data or environment configuration.
-- **All currently implemented tests are passing.**
+- The refactoring of key test files to pytest is complete and the tests are passing.
 
 ## Known Issues
 
@@ -46,3 +44,4 @@ This document tracks the progress, completed features, and remaining tasks for l
 - The decision to use `devenv.nix` for environment management has been made.
 - The decision to use `parsita` for parsing has been made.
 - **The main project focus is now on implementing the capital gains tracking tool using dated subaccounts and FIFO logic.**
+- **Adopted pytest as the testing framework and refactored existing tests.**
