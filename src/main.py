@@ -12,7 +12,7 @@ import re
 from parsita import ParseError
 from src.classes import Posting, Transaction, sl
 from returns.result import Result, Success, Failure
-from src.capital_gains import find_open_transactions, find_close_transactions
+from src.capital_gains import find_open_transactions, find_close_transactions, calculate_capital_gains # Import calculate_capital_gains
 from src.balance import calculate_balances_and_lots # Import calculate_balances_and_lots
 from returns.pipeline import (flow)
 from returns.pointfree import (bind)
@@ -317,12 +317,62 @@ def balance_cmd(filename: Path):
             # Sort accounts alphabetically
             for account_name in sorted(balance_sheet.accounts.keys(), key=lambda x: str(x)):
                 account = balance_sheet.get_account(account_name)
-                if not account.isAsset():
+                if not account.name.isAsset():
                     continue
                 click.echo(f"{account.name}")
                 # Sort commodities alphabetically within each account
                 for commodity, balance in sorted(account.balances.items(), key=lambda x: str(x[0])):
                     click.echo(f"  {balance.total_amount}")
+
+    exit(0)
+
+
+# Define the calculate-capgains command
+@cli.command("calculate-capgains")
+@click.argument(
+    "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
+)
+def calculate_capgains_cmd(filename: Path):
+    """Calculates and reports capital gains and losses."""
+    result: Result[Journal, ValueError] = flow(
+        str(filename.absolute()),
+        parse_hledger_journal,
+        bind(lambda journal: parse_filter_strip(journal, True, False, None)) # Flatten and process journal
+    )
+
+    match result:
+        case Failure(error):
+            print(f"Error parsing journal file: {error}")
+            exit(1)
+        case Success(journal):
+            # Extract only Transaction objects from the flattened entries
+            transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
+            
+            # Calculate balances and lots
+            balance_sheet = calculate_balances_and_lots(transactions_only)
+
+            # Calculate capital gains
+            capital_gain_results = calculate_capital_gains(transactions_only, balance_sheet)
+
+            # Print the results
+            click.echo("\nCapital Gains Results:")
+            if capital_gain_results:
+                for result in capital_gain_results:
+                    closing_date = result.closing_posting.transaction.date.strftime('%Y-%m-%d') if result.closing_posting.transaction else 'N/A'
+                    closing_account = result.closing_posting.account.name if result.closing_posting.account else 'N/A'
+                    closing_commodity = result.matched_quantity.commodity.name if result.matched_quantity.commodity else 'N/A'
+                    matched_quantity = result.matched_quantity.quantity
+                    acquisition_date = result.opening_lot_original_posting.transaction.date.strftime('%Y-%m-%d') if result.opening_lot_original_posting.transaction else 'N/A'
+                    cost_basis = result.cost_basis.quantity
+                    proceeds = result.proceeds.quantity
+                    gain_loss = result.gain_loss.quantity
+                    gain_loss_commodity = result.gain_loss.commodity.name if result.gain_loss.commodity else 'N/A'
+
+
+                    click.echo(f"  Sale Date: {closing_date}, Account: {closing_account}, Commodity: {closing_commodity}, Quantity: {matched_quantity}")
+                    click.echo(f"    Acquisition Date: {acquisition_date}, Cost Basis: {cost_basis}, Proceeds: {proceeds}, Gain/Loss: {gain_loss} {gain_loss_commodity}")
+            else:
+                click.echo("  No capital gains or losses calculated.")
 
     exit(0)
 

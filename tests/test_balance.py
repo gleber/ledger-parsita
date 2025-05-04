@@ -1,7 +1,11 @@
 import pytest
+import importlib # Import the importlib module
 from decimal import Decimal
 from datetime import date
 
+# Import and then reload the src.classes module to ensure the latest version is used
+from src import classes
+importlib.reload(classes)
 from src.classes import AccountName, Commodity, Amount, Cost, CostKind, Posting, Transaction
 from src.balance import calculate_balances_and_lots, BalanceSheet, Lot, Account, Balance, CashBalance, AssetBalance
    
@@ -197,4 +201,3 @@ def test_calculate_balances_and_lots():
     assert len(baz_balance.lots) == 1
     assert baz_balance.lots[0].quantity == Amount(Decimal("20"), Commodity("BAZ"))
     assert baz_balance.lots[0].cost_basis_per_unit == Amount(Decimal("20.00"), Commodity("USD"))
-

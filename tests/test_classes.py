@@ -52,6 +52,17 @@ def test_commodity_is_cash_method():
     assert pln.isCash()
     assert not aapl.isCash()
 
+def test_commodity_is_crypto_method():
+    btc = Commodity(name="BTC")
+    eth = Commodity(name="ETH")
+    aapl = Commodity(name="AAPL")
+    usd = Commodity(name="USD")
+
+    assert btc.isCrypto()
+    assert eth.isCrypto()
+    assert not aapl.isCrypto()
+    assert not usd.isCrypto()
+
 def test_commodity_is_stock_method():
     aapl = Commodity(name="AAPL")
     goog = Commodity(name="GOOG")
@@ -66,17 +77,6 @@ def test_commodity_is_stock_method():
     assert not btc.isStock()
     assert not usd.isStock()
     assert not option.isStock()
-
-def test_commodity_is_crypto_method():
-    btc = Commodity(name="BTC")
-    eth = Commodity(name="ETH")
-    aapl = Commodity(name="AAPL")
-    usd = Commodity(name="USD")
-
-    assert btc.isCrypto()
-    assert eth.isCrypto()
-    assert not aapl.isCrypto()
-    assert not usd.isCrypto()
 
 def test_commodity_is_option_method():
     option1 = Commodity(name="TSLA260116C200")

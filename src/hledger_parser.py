@@ -303,7 +303,7 @@ class HledgerParsers(ParserContext, whitespace=None):
     )
 
 
-def recursive_include(journal: Journal, journal_fn: str) -> Result[Journal, str]:
+def recursive_include(journal: Journal, journal_fn: Path) -> Result[Journal, str]:
     parent_journal_dir = Path(journal_fn).parent
 
     def include_one(entry: JournalEntry) -> JournalEntry:
@@ -353,8 +353,8 @@ def parse_hledger_journal(filename: str | Path) -> Result[Journal, Exception]:
         read_file_content,
         bind(
             lambda file_content: parse_hledger_journal_content(
-                file_content, filename # Pass the Path object
+                file_content, filename
             )
         ),
-        bind(lambda journal: recursive_include(journal, str(filename))), # recursive_include still expects a string
+        bind(lambda journal: recursive_include(journal, filename)), # recursive_include still expects a string
     )

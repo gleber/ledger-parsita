@@ -202,17 +202,7 @@ assets:broker:AAPL:20230120
 assets:broker:GOOG:20230125
   10 GOOG
 assets:cash
-  1080 USD
-equity:opening-balances
-  -1000 USD
-expenses:food
-  20 USD
-expenses:travel
-  50 EUR
-income:salary
-  -500 USD
-liabilities:credit-card
-  -50 EUR"""
+  1080 USD"""
 
     result = subprocess.run(
         ["python", "-m", "src.main", "balance", str(balance_journal_path)],

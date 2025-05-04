@@ -5,200 +5,138 @@ import re
 import datetime
 
 from src.classes import Journal, Transaction, Posting, AccountName, Amount, Commodity, SourceLocation
-
-dated_account_regex = re.compile(r"^assets:.*:.*:\d{8}$")
-
+from src.balance import BalanceSheet, AssetBalance, CashBalance, Lot # Import BalanceSheet, Balance types, and Lot
 
 @dataclass
-class OpenLot:
-    """Represents an open position lot."""
-    posting: Posting
-    remaining_quantity: Decimal
-    transaction_date: datetime.date
-
-
-@dataclass
-class MatchResult:
-    """Represents a match between a closing posting and an opening lot."""
+class CapitalGainResult:
+    """Represents the result of a capital gain/loss calculation for a matched sale portion."""
     closing_posting: Posting
-    opening_lot: OpenLot
-    matched_quantity: Decimal
+    opening_lot_original_posting: Posting # Reference to the original posting of the matched lot
+    matched_quantity: Amount
+    cost_basis: Amount # Total cost basis for the matched quantity
+    proceeds: Amount # Total proceeds for the matched quantity
+    gain_loss: Amount # Calculated gain or loss
 
-
-def find_transactions_by_posting_criteria(
-    journal: Journal, posting_filter: Callable[[Posting], bool]
-) -> List[Transaction]:
+def calculate_capital_gains(transactions: List[Transaction], balance_sheet: BalanceSheet) -> List[CapitalGainResult]:
     """
-    Finds transactions containing at least one posting that matches the given criteria.
-    Returns a list of unique Transaction objects.
+    Calculates capital gains and losses by matching closing postings to opening lots using FIFO logic.
     """
-    matching_txns = []
-    seen_txns = set()
-    for entry in journal.entries:
-        if entry.transaction:
-            tx = entry.transaction
-            tx_key = tx.getKey()
-            if tx_key in seen_txns:
-                continue  # Skip if transaction has already been processed
+    capital_gain_results: List[CapitalGainResult] = []
 
-            found_matching_posting = False
-            for posting in tx.postings:
-                if posting_filter(posting):
-                    found_matching_posting = True
-                    break
+    # Iterate through transactions to find closing postings (sales)
+    for transaction in transactions:
+        for posting in transaction.postings:
+            if posting.isClosing():
+                closing_account = posting.account
+                closing_commodity = posting.amount.commodity if posting.amount else None
+                closing_quantity = abs(posting.amount.quantity) if posting.amount else Decimal(0)
 
-            if found_matching_posting:
-                matching_txns.append(tx)
-                seen_txns.add(tx_key)
-    return matching_txns
+                if closing_commodity and closing_quantity > 0:
+                    # Find proceeds for this closing posting within the same transaction
+                    total_proceeds = Amount(Decimal(0), Commodity("")) # Initialize with zero amount and empty commodity
+                    proceeds_found = False
+                    for other_posting in transaction.postings:
+                        if other_posting != posting and other_posting.amount and other_posting.amount.quantity > 0 and other_posting.amount.commodity.isCash():
+                             if total_proceeds.commodity.name == "": # Set commodity on first cash posting
+                                total_proceeds = Amount(total_proceeds.quantity + other_posting.amount.quantity, other_posting.amount.commodity)
+                             elif total_proceeds.commodity == other_posting.amount.commodity:
+                                total_proceeds.quantity += other_posting.amount.quantity
+                             else:
+                                 # Handle multiple cash commodities in one transaction if necessary, or raise error
+                                 print(f"Warning: Multiple cash commodities in transaction {transaction.date} - {transaction.payee}. Only summing {total_proceeds.commodity.name}.")
+                                 total_proceeds.quantity += other_posting.amount.quantity # Still sum, but warn
+                             proceeds_found = True
 
+                    if not proceeds_found:
+                         print(f"Warning: No cash proceeds found for closing posting in transaction {transaction.date} - {transaction.payee} for {closing_quantity} {closing_commodity.name} from {closing_account.name}.")
+                         # Depending on requirements, might skip this posting or handle differently
 
-# Posting filter functions
+                    quantity_to_match = closing_quantity
 
-def is_close_position_posting(posting: Posting) -> bool:
-    """Checks if a posting indicates closing a position in an asset account and is not cash."""
-    return bool(
-        posting.account
-        and posting.account.isAsset()
-        and posting.amount
-        and posting.amount.quantity < 0
-        and not posting.amount.commodity.isCash()
-    )
+                    # Collect all relevant AssetBalance objects for the closing commodity under the closing account and its children
+                    relevant_asset_balances: List[AssetBalance] = []
+                    for account_name, account_data in balance_sheet.accounts.items():
+                        if account_name.name.startswith(closing_account.name):
+                            for commodity_name, balance in account_data.balances.items():
+                                if isinstance(balance, AssetBalance) and balance.commodity == closing_commodity:
+                                     relevant_asset_balances.append(balance)
 
+                    if relevant_asset_balances:
+                        # Combine lots from all relevant balances and sort by acquisition date
+                        all_relevant_lots: List[Lot] = []
+                        for balance in relevant_asset_balances:
+                            all_relevant_lots.extend(balance.lots)
 
-def is_open_position_with_dated_subaccount_posting(posting: Posting) -> bool:
-    """Checks if a posting indicates opening a position in a dated asset account and is not cash."""
-    return bool(
-        posting.account
-        and posting.account.isAsset()
-        and posting.account.isDatedSubaccount()
-        and posting.amount
-        and posting.amount.quantity > 0
-        and not posting.amount.commodity.isCash()
-    )
+                        sorted_lots = sorted(all_relevant_lots, key=lambda lot: datetime.datetime.strptime(lot.acquisition_date, '%Y-%m-%d').date())
 
+                        # Perform FIFO matching
+                        for current_lot in sorted_lots:
+                            if quantity_to_match <= 0:
+                                break # Stop if the closing quantity is fully matched
 
-def is_close_position_without_dated_subaccount_posting(posting: Posting) -> bool:
-    """Checks if a posting indicates closing a position in a non-dated asset account and is not cash."""
-    return bool(
-        posting.account
-        and posting.account.isAsset()
-        and not posting.account.isDatedSubaccount()
-        and posting.amount
-        and posting.amount.quantity < 0
-        and not posting.amount.commodity.isCash()
-    )
+                            if current_lot.remaining_quantity > 0:
+                                match_quantity_decimal = min(quantity_to_match, current_lot.remaining_quantity)
+                                match_quantity_amount = Amount(match_quantity_decimal, closing_commodity)
 
+                                # Calculate cost basis for the matched quantity
+                                cost_basis_decimal = match_quantity_decimal * current_lot.cost_basis_per_unit.quantity
+                                cost_basis_amount = Amount(cost_basis_decimal, current_lot.cost_basis_per_unit.commodity)
 
-# Refactored functions using the higher-order function
-def find_open_transactions(journal: Journal) -> List[Transaction]:
-    """
-    Finds transactions containing postings that increase the quantity
-    in an asset account (indicating an opening position), regardless of dated subaccount.
-    Returns a list of unique Transaction objects.
-    """
-    return find_transactions_by_posting_criteria(journal, lambda posting: posting.isOpening())
+                                # Calculate proceeds for the matched quantity (pro-rata)
+                                proceeds_decimal = (match_quantity_decimal / closing_quantity) * total_proceeds.quantity if closing_quantity != 0 else Decimal(0)
+                                proceeds_amount = Amount(proceeds_decimal, total_proceeds.commodity)
 
-
-def find_close_transactions(journal: Journal) -> List[Transaction]:
-    """
-    Finds transactions containing postings that decrease the quantity
-    in an asset account (indicating a closing position), regardless of dated subaccount.
-    Returns a list of unique Transaction objects.
-    """
-    return find_transactions_by_posting_criteria(journal, is_close_position_posting)
+                                # Calculate gain/loss
+                                # Ensure both amounts are in the same currency for calculation
+                                if cost_basis_amount.commodity != proceeds_amount.commodity:
+                                     print(f"Warning: Cost basis commodity ({cost_basis_amount.commodity.name}) and proceeds commodity ({proceeds_amount.commodity.name}) differ for match in transaction {transaction.date} - {transaction.payee}. Cannot calculate gain/loss directly.")
+                                     gain_loss_amount = Amount(Decimal(0), Commodity("")) # Cannot calculate if currencies differ
+                                else:
+                                    gain_loss_decimal = proceeds_decimal - cost_basis_decimal
+                                    gain_loss_amount = Amount(gain_loss_decimal, proceeds_amount.commodity)
 
 
-def find_open_transactions_with_dated_subaccounts(
-    journal: Journal,
-) -> List[Transaction]:
-    """
-    Finds transactions containing postings that increase the quantity
-    in an asset account that uses a dated subaccount.
-    Returns a list of unique Transaction objects.
-    """
-    return find_transactions_by_posting_criteria(
-        journal, is_open_position_with_dated_subaccount_posting
-    )
-
-
-def find_close_transactions_without_dated_subaccounts(
-    journal: Journal,
-) -> List[Transaction]:
-    """
-    Finds transactions containing postings that decrease the quantity
-    in an asset account that does NOT use a dated subaccount.
-    Returns a list of unique Transaction objects.
-    """
-    return find_transactions_by_posting_criteria(
-        journal, is_close_position_without_dated_subaccount_posting
-    )
-
-
-def get_base_account_name(account_name: AccountName) -> str:
-    """Extracts the base account name from a potentially dated subaccount."""
-    if account_name.isDatedSubaccount():
-        return ":".join(account_name.parts[:-1])
-    return account_name.name
-
-
-def match_fifo(journal: Journal) -> List[MatchResult]:
-    """
-    Matches closing postings without dated subaccounts to opening postings with dated subaccounts
-    using FIFO logic.
-    """
-    open_lots: Dict[tuple[str, str], List[OpenLot]] = {}
-    match_results: List[MatchResult] = []
-
-    # Sort entries by date to ensure FIFO
-    sorted_entries = sorted(journal.entries, key=lambda entry: entry.transaction.date if entry.transaction else datetime.date.min)
-
-    for entry in sorted_entries:
-        if entry.transaction:
-            tx = entry.transaction
-            for posting in tx.postings:
-                if posting.isOpening() and posting.account and posting.account.isDatedSubaccount() and posting.amount is not None:
-                    # Add to open lots
-                    base_account = get_base_account_name(posting.account)
-                    if posting.amount is not None: # Redundant check for Mypy
-                        commodity_name = posting.amount.commodity.name
-                        key = (commodity_name, base_account)
-                        if key not in open_lots:
-                            open_lots[key] = []
-                        if posting.amount is not None: # Redundant check for Mypy
-                            open_lots[key].append(OpenLot(posting=posting, remaining_quantity=posting.amount.quantity, transaction_date=tx.date))
-                            # Ensure lots are sorted by date (should be due to sorted entries, but good practice)
-                            open_lots[key].sort(key=lambda lot: lot.transaction_date)
-
-                elif is_close_position_without_dated_subaccount_posting(posting) and posting.amount is not None:
-                    # Match with open lots
-                    base_account = get_base_account_name(posting.account)
-                    if posting.amount is not None: # Redundant check for Mypy
-                        commodity_name = posting.amount.commodity.name
-                        key = (commodity_name, base_account)
-                        closing_quantity = abs(posting.amount.quantity)
-
-                        if key in open_lots:
-                            lots_for_commodity = open_lots[key]
-                            while closing_quantity > 0 and lots_for_commodity:
-                                current_lot = lots_for_commodity[0]
-                                match_quantity = min(closing_quantity, current_lot.remaining_quantity)
-
-                                match_results.append(MatchResult(
+                                # Create and append CapitalGainResult
+                                capital_gain_results.append(CapitalGainResult(
                                     closing_posting=posting,
-                                    opening_lot=current_lot,
-                                    matched_quantity=match_quantity
+                                    opening_lot_original_posting=current_lot.original_posting,
+                                    matched_quantity=match_quantity_amount,
+                                    cost_basis=cost_basis_amount,
+                                    proceeds=proceeds_amount,
+                                    gain_loss=gain_loss_amount
                                 ))
 
-                                current_lot.remaining_quantity -= match_quantity
-                                closing_quantity -= match_quantity
+                                # Update remaining quantity in the lot
+                                current_lot.remaining_quantity -= match_quantity_decimal
+                                quantity_to_match -= match_quantity_decimal
 
-                                if current_lot.remaining_quantity == 0:
-                                    lots_for_commodity.pop(0) # Remove fully consumed lot
+                        if quantity_to_match > 0:
+                            print(f"Warning: Not enough open lots found for {closing_quantity} {closing_commodity.name} in {closing_account.name} to match closing posting in transaction {transaction.date} - {transaction.payee}. Remaining quantity to match: {quantity_to_match}")
 
-                            if closing_quantity > 0 and posting.amount is not None:
-                                # Handle case where there are not enough open lots
-                                print(f"Warning: Not enough open lots for {commodity_name} in {base_account} to match closing quantity of {abs(posting.amount.quantity)} in transaction {tx.date} {tx.payee}")
-                                # Depending on requirements, we might raise an error here instead
+                    else:
+                        print(f"Warning: Could not find any relevant AssetBalance for {closing_account.name}:{closing_commodity.name} to perform FIFO matching.")
 
-    return match_results
+
+    return capital_gain_results
+
+def find_open_transactions(journal: Journal) -> List[Transaction]:
+    """Finds transactions that open positions."""
+    open_txns: List[Transaction] = []
+    for entry in journal.entries:
+        if entry.transaction:
+            for posting in entry.transaction.postings:
+                if posting.isOpening():
+                    open_txns.append(entry.transaction)
+                    break # Move to the next transaction once an opening posting is found
+    return open_txns
+
+def find_close_transactions(journal: Journal) -> List[Transaction]:
+    """Finds transactions that close positions."""
+    close_txns: List[Transaction] = []
+    for entry in journal.entries:
+        if entry.transaction:
+            for posting in entry.transaction.postings:
+                if posting.isClosing():
+                    close_txns.append(entry.transaction)
+                    break # Move to the next transaction once a closing posting is found
+    return close_txns

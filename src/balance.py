@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Dict, List, Union
 
-from src.classes import AccountName, Amount, Commodity, Posting, Transaction, CostKind
+from src.classes import AccountName, Amount, Commodity, Posting, Transaction, CostKind, CommodityKind # Import CommodityKind
 
 @dataclass
 class Lot:
@@ -11,6 +11,11 @@ class Lot:
     quantity: Amount
     cost_basis_per_unit: Amount # Cost per unit in the transaction currency
     original_posting: Posting # Reference to the posting that created this lot
+    remaining_quantity: Decimal = field(init=False) # Quantity remaining to be matched
+
+    def __post_init__(self):
+        # Initialize remaining_quantity to the initial quantity of the lot
+        self.remaining_quantity = self.quantity.quantity
 
 @dataclass
 class Balance:
@@ -22,7 +27,18 @@ class Balance:
 class CashBalance(Balance):
     """Represents the balance of a cash or cryptocurrency commodity within an account."""
     # Inherits commodity and total_amount from Balance
-    pass
+
+    def add_posting(self, posting: Posting):
+        """Adds a posting amount to the total_amount for this CashBalance."""
+        if posting.amount is not None:
+            if self.total_amount.commodity.name == "": # Handle initial zero amount
+                 self.total_amount = Amount(self.total_amount.quantity + posting.amount.quantity, posting.amount.commodity)
+            elif self.total_amount.commodity != posting.amount.commodity:
+                raise ValueError("Cannot add amounts of different commodities")
+            else:
+                # Create a new Amount object with the updated quantity
+                self.total_amount = Amount(self.total_amount.quantity + posting.amount.quantity, self.total_amount.commodity)
+
 
 @dataclass
 class AssetBalance(Balance):
@@ -66,9 +82,9 @@ class Account:
         """Gets or creates a Balance subclass object for a given commodity based on its type."""
         if commodity not in self.balances:
             # Determine the type of Balance to create based on commodity type
-            if commodity.isCash() or commodity.isCrypto(): # Assuming isCrypto() method exists or similar logic
+            if commodity.isCash():
                 self.balances[commodity] = CashBalance(commodity=commodity)
-            elif commodity.isStock() or commodity.isOption(): # Assuming isStock() and isOption() methods exist or similar logic
+            elif commodity.isStock() or commodity.isOption() or commodity.kind == CommodityKind.CRYPTO: # Include CRYPTO for AssetBalance
                  # Initialize AssetBalance with zero total_amount and cost_basis_per_unit
                 self.balances[commodity] = AssetBalance(commodity=commodity, total_amount=Amount(Decimal(0), commodity), cost_basis_per_unit=Amount(Decimal(0), Commodity("")))
             else:
@@ -130,7 +146,10 @@ def calculate_balances_and_lots(transactions: List[Transaction]) -> BalanceSheet
     """
     balance_sheet = BalanceSheet()
 
-    for transaction in transactions:
+    # Sort transactions by date to ensure correct FIFO processing
+    sorted_transactions = sorted(transactions, key=lambda t: t.date)
+
+    for transaction in sorted_transactions:
         for posting in transaction.postings:
             account_name = posting.account
             amount = posting.amount
@@ -142,43 +161,38 @@ def calculate_balances_and_lots(transactions: List[Transaction]) -> BalanceSheet
                 # Ensure the balance for the commodity exists and update if it's a CashBalance
                 balance = account.get_balance(amount.commodity)
                 if isinstance(balance, CashBalance):
-                    # Explicitly add amount to total_amount for CashBalance
-                    if balance.total_amount.commodity.name == "": # Handle initial zero amount
-                         balance.total_amount = Amount(balance.total_amount.quantity + amount.quantity, amount.commodity)
-                    elif balance.total_amount.commodity != amount.commodity:
-                        raise ValueError("Cannot add amounts of different commodities")
-                    else:
-                        balance.total_amount.quantity += amount.quantity
+                     balance.add_posting(posting) # Call the new add_posting method
                 # For AssetBalance, total_amount is updated when lots are added, not by postings here
 
 
         # After processing all postings in a transaction, check for asset acquisitions and track lots
         acquisition_posting = transaction.get_asset_acquisition_posting()
         if acquisition_posting:
-            # Get the cost for this posting (explicit or inferred)
-            cost = transaction.get_posting_cost(acquisition_posting)
+                # Get the cost for this posting (explicit or inferred)
+                cost = transaction.get_posting_cost(acquisition_posting)
 
-            if cost and acquisition_posting.amount is not None:
-                cost_basis_per_unit = None
-                if cost.kind == CostKind.TotalCost:
-                    # Calculate per-unit cost from total cost
-                    if acquisition_posting.amount.quantity != 0:
-                        cost_basis_per_unit_value = abs(cost.amount.quantity / acquisition_posting.amount.quantity)
-                        cost_basis_per_unit = Amount(cost_basis_per_unit_value, cost.amount.commodity)
-                elif cost.kind == CostKind.UnitCost:
-                    # Unit cost is provided directly
-                    cost_basis_per_unit = cost.amount
+                if cost and acquisition_posting.amount is not None:
+                    cost_basis_per_unit = None
+                    if cost.kind == CostKind.TotalCost:
+                        # Calculate per-unit cost from total cost
+                        if acquisition_posting.amount.quantity != 0:
+                            cost_basis_per_unit_value = abs(cost.amount.quantity / acquisition_posting.amount.quantity)
+                            cost_basis_per_unit = Amount(cost_basis_per_unit_value, cost.amount.commodity)
+                    elif cost.kind == CostKind.UnitCost:
+                        # Unit cost is provided directly
+                        cost_basis_per_unit = cost.amount
 
-                if cost_basis_per_unit:
-                    lot = Lot(
-                        acquisition_date=str(transaction.date), # Use transaction date as acquisition date
-                        quantity=acquisition_posting.amount, # Use quantity from the acquisition posting
-                        cost_basis_per_unit=cost_basis_per_unit,
-                        original_posting=acquisition_posting
-                    )
+                    if cost_basis_per_unit:
+                        lot = Lot(
+                            acquisition_date=str(transaction.date), # Use transaction date as acquisition date
+                            quantity=acquisition_posting.amount, # Use quantity from the acquisition posting
+                            cost_basis_per_unit=cost_basis_per_unit,
+                            original_posting=acquisition_posting
+                            # remaining_quantity is initialized in __post_init__
+                        )
 
-                    account_name = acquisition_posting.account # Get account name from acquisition posting
-                    balance_sheet.add_lot_to_account(account_name, acquisition_posting.amount.commodity, lot)
+                        account_name = acquisition_posting.account # Get account name from acquisition posting
+                        balance_sheet.add_lot_to_account(account_name, acquisition_posting.amount.commodity, lot)
 
 
     return balance_sheet

@@ -4,7 +4,8 @@ This document outlines the current focus and active considerations for ledger-pa
 
 ## Current Work Focus
 
-- Implementing the capital gains tracking tool.
+- Removing the non-functional `closing_postings` mechanism.
+- Reimplementing the FIFO matching logic for capital gains calculation.
 - Completed performance optimization for source position lookups during parsing.
 
 ## Recent Changes
@@ -34,23 +35,38 @@ This document outlines the current focus and active considerations for ledger-pa
 - **Modified `PositionAware.set_filename` to use the `SourceCacheManager` for efficient line/column calculation.**
 - **Resolved an `ImportError` in `tests/test_filtering.py` and an `AttributeError` in `SourceCacheManager` during testing.**
 - **Changed `SourceCacheManager` to use `__init__` instead of `__new__` while keeping the global instance, as requested.**
+- **Planned the removal of the non-functional `closing_postings` mechanism and the reimplementation strategy for FIFO matching.**
+- Added `isCrypto()` method to `Commodity` class in `src/classes.py` and added tests for it in `tests/test_classes.py`.
+- Fixed `AttributeError: 'Account' object has no attribute 'isAsset'` in `src/main.py` by accessing `account.name.isAsset()`.
+- Added a rule that each test file must contain at most 500 lines of code.
 
 ## Next Steps
 
-- Define the data structures needed for tracking asset lots and capital gains calculations.
-- Implement the logic for identifying closed positions based on journal entries and dated subaccounts.
-- Implement the FIFO logic for matching acquisitions and dispositions.
-- Implement the calculation of capital gains/losses.
-- Design and implement the mechanism for generating new journal entries for capital gains transactions.
-- Design and implement the safe in-place journal file update mechanism.
-- Add comprehensive unit tests for all components of the capital gains tracking tool.
-- Integrate the new tool into the CLI.
+- **Phase 1: Removal**
+    - Modify `src/balance.py`: Remove code attempting to use `account.closing_postings`.
+    - Modify `src/capital_gains.py`: Remove the old `match_fifo` function.
+- **Phase 2: Reimplementation**
+    - Create new function `calculate_capital_gains(transactions: List[Transaction], balance_sheet: BalanceSheet)` in `src/capital_gains.py`.
+    - Implement core FIFO logic within `calculate_capital_gains`:
+        - Track remaining lot quantities mutably.
+        - Iterate transactions to find closing postings (`posting.isClosing()`).
+        - Determine proceeds from the same transaction.
+        - Match closing quantity against available lots (FIFO).
+        - Calculate cost basis, proceeds, and gain/loss for each match.
+        - Update remaining lot quantities.
+    - Define `CapitalGainResult` dataclass to structure the output.
+    - Integrate the new `calculate_capital_gains` function into the CLI (`src/main.py`).
+    - Add comprehensive `pytest` tests for the new logic.
+- Design and implement the mechanism for generating new journal entries for capital gains transactions (future step after calculation works).
+- Design and implement the safe in-place journal file update mechanism (future step).
+- Check existing test files to ensure they adhere to the new 500-line limit and split them if necessary.
 
 ## Active Decisions and Considerations
 
 - How to best represent the parsed hledger data structure in Python.
 - Design of the filtering API.
 - Implementation details of the in-memory caching for source position lookups.
+- Specific approach for FIFO matching: Iterate transactions, use `BalanceSheet` lots, track remaining quantity mutably.
 
 ## Important Patterns and Preferences
 
@@ -65,3 +81,4 @@ This document outlines the current focus and active considerations for ledger-pa
 - Successfully refactored existing `unittest` tests to `pytest` style, improving test readability and maintainability.
 - Gained experience in implementing and integrating in-memory caching for performance optimization.
 - Encountered and resolved issues related to file path handling and import mechanisms during development.
+- Identified non-functional code (`closing_postings` mechanism) and planned its removal and replacement.
