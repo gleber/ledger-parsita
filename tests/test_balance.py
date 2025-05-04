@@ -2,7 +2,7 @@ import pytest
 from decimal import Decimal
 from datetime import date
 
-from src.classes import AccountName, Amount, Commodity, Posting, Transaction
+from src.classes import AccountName, Commodity, Amount, Cost, CostKind, Posting, Transaction
 from src.balance import calculate_balances_and_lots, BalanceSheet, AssetLots, Lot
 
 def test_calculate_balances_and_lots():
@@ -36,16 +36,26 @@ def test_calculate_balances_and_lots():
                 Posting(account=AccountName(parts=["assets", "bank"]), amount=Amount(Decimal("-200.00"), Commodity("USD"))),
             ],
         ),
+        # Asset acquisition with implicit cost
+        Transaction(
+            date=date(2024, 4, 1),
+            payee="Buy BAZ with implicit cost",
+            postings=[
+                Posting(account=AccountName(parts=["assets", "broker", "BAZ", "20240401"]), amount=Amount(Decimal("20"), Commodity(name="BAZ"))),
+                Posting(account=AccountName(parts=["assets", "bank"]), amount=Amount(Decimal("-400.00"), Commodity(name="USD"))),
+            ],
+        ),
     ]
 
     balance_sheet, asset_lots = calculate_balances_and_lots(transactions)
 
     # Verify BalanceSheet
     expected_balance_sheet: BalanceSheet = {
-        AccountName(parts=["assets", "bank"]): {Commodity("USD"): Amount(Decimal("300.00"), Commodity("USD"))},
+        AccountName(parts=["assets", "bank"]): {Commodity("USD"): Amount(Decimal("300.00") - Decimal("400.00"), Commodity("USD"))}, # Updated balance
         AccountName(parts=["equity", "opening-balances"]): {Commodity("USD"): Amount(Decimal("-1000.00"), Commodity("USD"))},
         AccountName(parts=["assets", "broker", "FOO", "20240201"]): {Commodity("FOO"): Amount(Decimal("10"), Commodity("FOO"))},
         AccountName(parts=["assets", "broker", "BAR", "20240301"]): {Commodity("BAR"): Amount(Decimal("5"), Commodity("BAR"))},
+        AccountName(parts=["assets", "broker", "BAZ", "20240401"]): {Commodity("BAZ"): Amount(Decimal("20"), Commodity("BAZ"))}, # New account
     }
 
     assert balance_sheet == expected_balance_sheet
@@ -68,6 +78,14 @@ def test_calculate_balances_and_lots():
                 original_posting=transactions[2].postings[0]
             )
         ],
+        AccountName(parts=["assets", "broker", "BAZ", "20240401"]): [
+            Lot(
+                acquisition_date="2024-04-01",
+                quantity=Amount(Decimal("20"), Commodity(name="BAZ")),
+                cost_basis_per_unit=Amount(Decimal("20.00"), Commodity(name="USD")), # Inferred: 400 / 20
+                original_posting=transactions[3].postings[0] # Use the correct transaction index
+            )
+        ],
     }
 
     # Compare asset_lots, ignoring the original_posting object identity
@@ -82,3 +100,7 @@ def test_calculate_balances_and_lots():
             assert actual_lot.cost_basis_per_unit == expected_lot.cost_basis_per_unit
             # Compare original_posting by content, not identity
             assert actual_lot.original_posting == expected_lot.original_posting
+
+
+if __name__ == '__main__':
+    unittest.main()

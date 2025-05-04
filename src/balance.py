@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Dict, List
 
-from src.classes import AccountName, Amount, Commodity, Posting, Transaction
+from src.classes import AccountName, Amount, Commodity, Posting, Transaction, CostKind
 
 @dataclass
 class Lot:
@@ -48,10 +48,21 @@ def calculate_balances_and_lots(transactions: List[Transaction]) -> tuple[Balanc
         # After processing all postings in a transaction, check for asset acquisitions and track lots
         acquisition_posting = transaction.get_asset_acquisition_posting()
         if acquisition_posting:
-            cost_basis_posting = transaction.get_cost_basis_posting(acquisition_posting)
-            if cost_basis_posting:
-                cost_basis_per_unit = transaction.calculate_cost_basis_per_unit(acquisition_posting, cost_basis_posting)
-                if cost_basis_per_unit and acquisition_posting.amount is not None: # Add None check
+            # Get the cost for this posting (explicit or inferred)
+            cost = transaction.get_posting_cost(acquisition_posting)
+
+            if cost and acquisition_posting.amount is not None:
+                cost_basis_per_unit = None
+                if cost.kind == CostKind.TotalCost:
+                    # Calculate per-unit cost from total cost
+                    if acquisition_posting.amount.quantity != 0:
+                        cost_basis_per_unit_value = abs(cost.amount.quantity / acquisition_posting.amount.quantity)
+                        cost_basis_per_unit = Amount(cost_basis_per_unit_value, cost.amount.commodity)
+                elif cost.kind == CostKind.UnitCost:
+                    # Unit cost is provided directly
+                    cost_basis_per_unit = cost.amount
+
+                if cost_basis_per_unit:
                     lot = Lot(
                         acquisition_date=str(transaction.date), # Use transaction date as acquisition date
                         quantity=acquisition_posting.amount, # Use quantity from the acquisition posting

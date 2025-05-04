@@ -459,6 +459,34 @@ class Transaction(PositionAware["Transaction"]):
         )
         return (self.date, self.payee, posting_keys)
 
+    def get_posting_cost(self, target_posting: Posting) -> Optional[Cost]:
+        """Gets the explicit or infers the cost for a posting."""
+        # Return explicit cost if it exists
+        if target_posting.cost:
+            return target_posting.cost
+
+        # Attempt to infer cost (Variant 3: two postings, different commodities)
+        if len(self.postings) == 2:
+            posting1 = self.postings[0]
+            posting2 = self.postings[1]
+
+            # Ensure both postings have amounts and different commodities
+            if posting1.amount is not None and posting2.amount is not None and posting1.amount.commodity != posting2.amount.commodity:
+                # Determine which posting is the target and which is the other
+                other_posting = None
+                if target_posting == posting1:
+                    other_posting = posting2
+                elif target_posting == posting2:
+                    other_posting = posting1
+
+                if other_posting:
+                    # Infer total cost (@@) based on the other posting's amount
+                    # The inferred cost amount is the absolute value of the other posting's amount
+                    inferred_amount = Amount(abs(other_posting.amount.quantity), other_posting.amount.commodity)
+                    return Cost(kind=CostKind.TotalCost, amount=inferred_amount)
+
+        return None # No explicit cost and inference not possible
+
     def get_asset_acquisition_posting(self) -> Optional[Posting]:
         """Finds the asset acquisition posting in the transaction, if any."""
         for posting in self.postings:
