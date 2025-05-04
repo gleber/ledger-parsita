@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import date
 from collections import defaultdict
 from typing import Optional, Union
 import click
@@ -128,7 +129,7 @@ def find_non_dated_stock_txs(journal: Journal) -> list[Transaction]:
             for posting in entry.transaction.postings:
                 if posting.amount and posting.amount.commodity:
                     unique_commodity[posting.amount.commodity.name] = posting.amount.commodity
-                if posting.isOpening() and not posting.account.isDatedSubaccount() and posting.account.isAsset() and posting.amount and posting.amount.commodity and (posting.amount.commodity.isStock()): # or posting.amount.commodity.isOption()):
+                if posting.isClosing() and not posting.account.isDatedSubaccount() and posting.account.isAsset() and posting.amount and posting.amount.commodity and (posting.amount.commodity.isStock()): # or posting.amount.commodity.isOption()):
                     non_dated_opens.append(entry.transaction)
                     break
     # kinds = defaultdict(list)
@@ -136,6 +137,67 @@ def find_non_dated_stock_txs(journal: Journal) -> list[Transaction]:
     #     kinds[v.kind].append(v.name)
     # pprint.pprint(dict(kinds))
     return non_dated_opens
+
+def find_capgain_non_crypto_txs(journal: Journal) -> list[Transaction]:
+    """Finds transactions which produce cap gains for non-crypto."""
+    restxs: list[Transaction] = []
+    for entry in journal.entries:
+        if entry.transaction: # Check if the entry is a transaction
+            if not (date(2024, 1, 1) <= entry.transaction.date < date(2025,1,1)):
+                continue
+            unique_commodity = {}
+            for posting in entry.transaction.postings:
+                if posting.amount and posting.amount.commodity:
+                    unique_commodity[posting.amount.commodity.name] = posting.amount.commodity
+            if len(unique_commodity) < 2:
+                continue
+            if not [ u for u in unique_commodity.values() if (u.isStock() or u.isOption()) ]:
+                continue
+
+            restxs.append(entry.transaction)
+            continue
+            for posting in entry.transaction.postings:
+                if posting.isClosing() and not posting.account.isDatedSubaccount() and posting.account.isAsset() and posting.amount and posting.amount.commodity and (posting.amount.commodity.isStock()): # or posting.amount.commodity.isOption()):
+                    restxs.append(entry.transaction)
+                    break
+    # kinds = defaultdict(list)
+    # for v in unique_commodity.values():
+    #     kinds[v.kind].append(v.name)
+    # pprint.pprint(dict(kinds))
+    return restxs
+
+
+
+# Define the find-non-dated-opens command
+@cli.command("capgains")
+@click.argument(
+    "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
+)
+def find_non_dated_opens_cmd(filename: Path):
+    """Finds transactions opening positions using non-dated subaccounts."""
+    result: Result[Journal, ValueError] = flow(
+        str(filename.absolute()),
+        parse_hledger_journal,
+        bind(lambda journal: parse_filter_strip(journal, True, False, None))
+    )
+    journal = result.unwrap()
+    capgains_tx = find_capgain_non_crypto_txs(journal)
+
+    click.echo("\nTransactions with capgains:", err=True)
+    for transaction in capgains_tx:
+        # Access attributes directly from the Transaction object
+        sl = transaction.source_location
+        #line_info = f"(at {sl.filename}:{sl.line}:{sl.column})" if sl else "(Line N/A)"
+        line_info = f"{sl.filename}:{sl.line}:{sl.column}" if sl else "(Line N/A)"
+        side = transaction.side()
+        # click.echo(f"- {transaction.date} {side} {transaction.payee} {line_info}")
+        click.echo(f"; {line_info}")
+        click.echo(transaction.to_journal_string())
+        click.echo(f"")
+
+    # Exit with a zero status code on success
+    exit(0)
+
 
 # Define the find-non-dated-opens command
 @cli.command("find-non-dated-opens")

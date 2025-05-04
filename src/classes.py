@@ -12,6 +12,7 @@ import re
 
 CASH_TICKERS = ["USD", "PLN", "EUR"]
 CRYPTO_TICKERS = ["BTC", "ETH", "XRP", "LTC", "BCH", "ADA", "DOT", "UNI", "LINK", "SOL", "PseudoUSD", "BUSD", "FDUSD", "USDT", "USDC", "FTM", "ALGO"]
+SIMPLE_CURRENCIES = ["$"]
 
 Output = TypeVar("Output")
 
@@ -162,9 +163,9 @@ class Commodity(PositionAware["Commodity"]):
         return self.name
 
     def to_journal_string(self) -> str:
-        if not self.name.isalnum():
-            return f'"{self.name}"'
-        return self.name
+        if self.name.isalpha() or self.name in SIMPLE_CURRENCIES:
+            return self.name
+        return f'"{self.name}"'
 
     @property
     def kind(self) -> CommodityKind:
@@ -216,7 +217,7 @@ class Amount(PositionAware["Amount"]):
         return f"{self.quantity} {self.commodity}"
 
     def to_journal_string(self) -> str:
-        return f"{self.quantity} {self.commodity.name}"
+        return f"{self.quantity} {self.commodity.to_journal_string()}"
 
 
 @dataclass
@@ -348,6 +349,15 @@ class Posting(PositionAware["Posting"]):
             and self.account.isAsset()
             and self.amount
             and self.amount.quantity > 0
+            and not self.amount.commodity.isCash()
+        )
+
+    def isClosing(self) -> bool:
+        return bool(
+            self.account
+            and self.account.isAsset()
+            and self.amount
+            and self.amount.quantity < 0
             and not self.amount.commodity.isCash()
         )
 
