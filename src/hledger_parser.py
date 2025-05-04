@@ -332,10 +332,10 @@ def recursive_include(journal: Journal, journal_fn: str) -> Result[Journal, str]
 
 
 def parse_hledger_journal_content(
-    file_content, filename=""
+    file_content: str, filename: Path
 ) -> Result[Journal, ParseError]:
     # Use map to handle the parsing result instead of unwrap
-    return HledgerParsers.journal.parse(file_content).set_filename(filename, filename)
+    return HledgerParsers.journal.parse(file_content).map(lambda j: j.set_filename(filename, file_content))
 
 
 @safe
@@ -353,8 +353,8 @@ def parse_hledger_journal(filename: str | Path) -> Result[Journal, Exception]:
         read_file_content,
         bind(
             lambda file_content: parse_hledger_journal_content(
-                file_content, str(filename)
+                file_content, filename # Pass the Path object
             )
         ),
-        bind(lambda journal: recursive_include(journal, str(filename))),
+        bind(lambda journal: recursive_include(journal, str(filename))), # recursive_include still expects a string
     )

@@ -9,6 +9,7 @@ from typing import List, Optional, Self, Union, Dict, Generic, TypeVar
 from datetime import date, datetime
 from decimal import Decimal
 import re
+import bisect
 
 CASH_TICKERS = ["USD", "PLN", "EUR"]
 CRYPTO_TICKERS = ["BTC", "ETH", "XRP", "LTC", "BCH", "ADA", "DOT", "UNI", "LINK", "SOL", "PseudoUSD", "BUSD", "FDUSD", "USDT", "USDC", "FTM", "ALGO"]
@@ -17,14 +18,53 @@ SIMPLE_CURRENCIES = ["$"]
 Output = TypeVar("Output")
 
 
-@dataclass
-class BaseFilter(ABC):
-    """Abstract base class for all filter conditions."""
+class SourceCacheManager:
+    """Manages caching of file content and newline offsets for efficient position lookup."""
 
-    @abstractmethod
-    def is_matching(self, transaction: "Transaction") -> bool:
-        """Checks if the transaction matches the filter condition."""
-        pass
+    def __init__(self):
+        self._content_cache: Dict[Path, str] = {}
+        self._newline_offsets_cache: Dict[Path, List[int]] = {}
+
+    def get_content(self, filename: Path) -> str:
+        """Reads and caches file content if not already cached."""
+        resolved_path = filename.resolve()
+        if resolved_path not in self._content_cache:
+            content = resolved_path.read_text()
+            self._content_cache[resolved_path] = content
+            self._newline_offsets_cache[resolved_path] = [i for i, char in enumerate(content) if char == '\n']
+        return self._content_cache[resolved_path]
+
+    def get_newline_offsets(self, filename: Path) -> List[int]:
+        """Returns cached newline offsets, ensuring content is cached first."""
+        resolved_path = filename.resolve()
+        if resolved_path not in self._newline_offsets_cache:
+             # Ensure content and offsets are cached
+            self.get_content(filename)
+        return self._newline_offsets_cache[resolved_path]
+
+    def calculate_line_column(self, filename: Path, offset: int) -> tuple[int, int]:
+        """Calculates 1-based line and column using cached newline offsets."""
+        newline_offsets = self.get_newline_offsets(filename)
+
+        # Find the index of the newline character immediately preceding the offset
+        # bisect_left finds the insertion point to maintain order, which is the index
+        # of the first element greater than or equal to offset.
+        # We want the index of the newline *before* the offset, so we subtract 1.
+        line_index = bisect.bisect_left(newline_offsets, offset)
+
+        # The line number is 1-based, so it's the index + 1
+        line = line_index + 1
+
+        # The column number is the offset relative to the start of the current line.
+        # The start of the current line is the offset of the previous newline + 1.
+        # If it's the first line (line_index == 0), the start offset is 0.
+        start_of_line_offset = newline_offsets[line_index - 1] + 1 if line_index > 0 else 0
+        column = offset - start_of_line_offset + 1 # Column is also 1-based
+
+        return line, column
+
+# Global instance (not a true singleton with __init__)
+source_cache_manager = SourceCacheManager()
 
 
 class PositionAware(Generic[Output]):
@@ -66,20 +106,6 @@ class PositionAware(Generic[Output]):
         # mypy can't handle self well
         return replace(self, **stripped_fields)  # type: ignore
 
-    def _calculate_line_column(self, content: str, offset: int) -> tuple[int, int]:
-        """Calculates the 1-based line and column number from an offset."""
-        line = 1
-        column = 1
-        for i, char in enumerate(content):
-            if i == offset:
-                break
-            if char == "\n":
-                line += 1
-                column = 1
-            else:
-                column += 1
-        return line, column
-
     def set_filename(self, filename: Path, file_content: str) -> Self:
         # mypy can't handle self well
         sub_fields = {field.name: getattr(self, field.name) for field in fields(self)}  # type: ignore
@@ -99,7 +125,8 @@ class PositionAware(Generic[Output]):
         if isinstance(sl, SourceLocation) and sl is not None:
             start_offset = sl.offset
             length = sl.length
-            line, column = self._calculate_line_column(file_content, start_offset)
+            # Use the singleton cache manager to calculate line and column
+            line, column = source_cache_manager.calculate_line_column(filename, start_offset)
             sub_fields["source_location"] = SourceLocation(
                 filename=filename.resolve(),
                 offset=start_offset,
@@ -471,19 +498,22 @@ class Transaction(PositionAware["Transaction"]):
             posting2 = self.postings[1]
 
             # Ensure both postings have amounts and different commodities
-            if posting1.amount is not None and posting2.amount is not None and posting1.amount.commodity != posting2.amount.commodity:
-                # Determine which posting is the target and which is the other
-                other_posting = None
-                if target_posting == posting1:
-                    other_posting = posting2
-                elif target_posting == posting2:
-                    other_posting = posting1
+            if posting1.amount is not None and posting2.amount is not None:
+                amt1 = posting1.amount
+                amt2 = posting2.amount
+                if amt1.commodity != amt2.commodity:
+                    # Determine which posting is the target and which is the other
+                    other_posting = None
+                    if target_posting == posting1:
+                        other_posting = posting2
+                    elif target_posting == posting2:
+                        other_posting = posting1
 
-                if other_posting:
-                    # Infer total cost (@@) based on the other posting's amount
-                    # The inferred cost amount is the absolute value of the other posting's amount
-                    inferred_amount = Amount(abs(other_posting.amount.quantity), other_posting.amount.commodity)
-                    return Cost(kind=CostKind.TotalCost, amount=inferred_amount)
+                    if other_posting and other_posting.amount is not None: # Add explicit check here too
+                        # Infer total cost (@@) based on the other posting's amount
+                        # The inferred cost amount is the absolute value of the other posting's amount
+                        inferred_amount = Amount(abs(other_posting.amount.quantity), other_posting.amount.commodity)
+                        return Cost(kind=CostKind.TotalCost, amount=inferred_amount)
 
         return None # No explicit cost and inference not possible
 

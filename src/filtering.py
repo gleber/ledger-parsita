@@ -4,12 +4,23 @@ from typing import List, Optional, Union
 
 from parsita import lit, rep, reg, repsep, ParserContext, opt, ParseError
 
-from src.classes import JournalEntry, Transaction, Posting, Amount, AccountName, BaseFilter
+from src.classes import JournalEntry, Transaction, Posting, Amount, AccountName
 from datetime import date, datetime
 from decimal import Decimal
 import re
 from dataclasses import dataclass
 from returns.result import Result, safe, Success, Failure
+from returns.curry import partial
+from abc import ABC, abstractmethod
+
+@dataclass
+class BaseFilter(ABC):
+    """Abstract base class for all filter conditions."""
+
+    @abstractmethod
+    def is_matching(self, transaction: "Transaction") -> bool:
+        """Checks if the transaction matches the filter condition."""
+        pass
 
 
 # Define filter condition classes

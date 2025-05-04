@@ -100,7 +100,3 @@ def test_calculate_balances_and_lots():
             assert actual_lot.cost_basis_per_unit == expected_lot.cost_basis_per_unit
             # Compare original_posting by content, not identity
             assert actual_lot.original_posting == expected_lot.original_posting
-
-
-if __name__ == '__main__':
-    unittest.main()
