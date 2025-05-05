@@ -36,6 +36,9 @@ This document tracks the progress, completed features, and remaining tasks for l
     - All tests pass after refactoring.
 - Refactored `build_balance_sheet_from_transactions` into the static method `BalanceSheet.from_transactions`.
 - Refactored `parse_hledger_journal` and `parse_hledger_journal_content` into static methods `Journal.parse_from_file` and `Journal.parse_from_content` within `src/classes.py`, resolving circular import issues.
+- Removed `parse_filter_strip` function from `src/main.py`.
+- Updated `Journal.parse_from_file` in `src/classes.py` to include filtering, flattening, and stripping logic via keyword-only arguments.
+- Updated CLI commands in `src/main.py` to use the new `Journal.parse_from_file` signature.
 
 ## What's Left to Build
 
@@ -45,10 +48,14 @@ This document tracks the progress, completed features, and remaining tasks for l
 - Ensure comprehensive test coverage for all filtering scenarios and edge cases.
 - Implement additional filter types if needed (future).
 - Develop other reporting features (future).
+- Design of the filtering API. (Completed)
+- Created `Filters` class in `src/filtering.py` with `apply_to_entries()` method.
+- Removed `_apply_filters` function from `src/filtering.py`.
 
 ## Current Status
 
 - **Phase 1 (Integration of Capital Gains Calculation into Balance Sheet Builder) is complete.**
+- **Filtering API design and implementation is complete.**
 - **Refactoring of balance calculation logic is complete.**
 - The performance optimization for source position lookups during parsing has been completed and verified by passing tests.
 - Ready to begin Phase 2 (Generating journal entries, updating files).

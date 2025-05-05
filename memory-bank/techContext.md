@@ -6,6 +6,8 @@ This document details the technologies, development setup, and dependencies for 
 
 - Python: The primary programming language.
 - Pytest: Used for writing and running tests.
+- Click: Used for building the command-line interface, including custom parameter types (`click.ParamType`).
+- Custom Filtering Classes: Implemented `BaseFilter`, `Filters`, and `FilterListParamType` classes in `src/filtering.py` for defining and applying transaction filters and integrating with Click.
 
 ## Development Setup
 

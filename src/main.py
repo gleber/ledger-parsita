@@ -1,51 +1,27 @@
 from dataclasses import replace
 from datetime import date
 from collections import defaultdict
-from typing import Optional, Union
+from typing import Optional, Union, List
 import click
 import pprint
 from pathlib import Path
-from src.filtering import filter_entries
 from src.classes import Journal, JournalEntry # Updated import
 import re
 from parsita import ParseError
 from src.classes import Posting, Transaction, sl
+from src.filtering import BaseFilter, parse_query
 from returns.result import Result, Success, Failure
 from src.capital_gains import find_open_transactions, find_close_transactions
 from src.balance import BalanceSheet # Updated import
 from returns.pipeline import (flow)
 from returns.pointfree import (bind)
-
+from src.filtering import Filters, FILTER_LIST # Import Filters and FILTER_LIST
 
 # Define the main click group
 @click.group()
 def cli():
     """A command-line tool for parsing hledger journal files."""
     pass
-
-def parse_filter_strip(journal: Journal, flat: bool, strip: bool, query: Optional[str]) -> Result[Journal, Union[ParseError, str, ValueError]]:
-    click.echo(f"Successfully parsed hledger journal: {sl(journal.source_location).filename}", err=True)
-
-    filtered_entries = []
-
-    # Apply filtering if a query is provided
-    if query:
-        filter_result = filter_entries(journal.entries, query)
-        match filter_result:
-            case Failure(error):
-                return Failure(ValueError(f"Error filtering entries: {error}")) # Wrap filtering error in ValueError
-            case Success(entries):
-                filtered_entries = entries
-    else:
-        filtered_entries = journal.entries
-
-    filtered_journal = replace(journal, entries=filtered_entries)
-
-    if flat:
-        filtered_journal = filtered_journal.flatten()
-    if strip:
-        filtered_journal = filtered_journal.strip_loc()
-    return Success(filtered_journal) # Return Success with the processed journal
 
 # Define the pprint command
 @cli.command("pprint")  # Explicitly name the command
@@ -59,14 +35,12 @@ def parse_filter_strip(journal: Journal, flat: bool, strip: bool, query: Optiona
     "-s", "--strip", is_flag=True, help="Strip location information from the output."
 )
 @click.option(
-    "-q", "--query", type=str, default=None, help="Filter transactions using a query string."
+    "-q", "--query", type=FILTER_LIST, default=None, help="Filter transactions using a query string."
 )
-def pprint_cmd(filename: Path, flat: bool, strip: bool, query: Optional[str]):
+def pprint_cmd(filename: Path, flat: bool, strip: bool, query: Optional[Filters]):
     """Parses the journal file and pretty-prints the result."""
-    result: Result[Journal, ValueError] = flow(
-        str(filename.absolute()),
-        Journal.parse_from_file, # Updated call
-        bind(lambda journal: parse_filter_strip(journal, flat, strip, query))
+    result: Result[Journal, Union[ParseError, str, ValueError]] = Journal.parse_from_file(
+        str(filename.absolute()), flat=flat, strip=strip, query=query
     )
 
     match result:
@@ -90,24 +64,20 @@ def pprint_cmd(filename: Path, flat: bool, strip: bool, query: Optional[str]):
     "-s", "--strip", is_flag=True, help="Strip location information from the output."
 )
 @click.option(
-    "-q", "--query", type=str, default=None, help="Filter transactions using a query string."
+    "-q", "--query", type=FILTER_LIST, default=None, help="Filter transactions using a query string."
 )
-def print_cmd(filename: Path, flat: bool, strip: bool, query: Optional[str]):
+def print_cmd(filename: Path, flat: bool, strip: bool, query: Optional[Filters]):
     """Parses the journal file and prints the result using to_journal_string."""
-    parse_result = Journal.parse_from_file(str(filename.absolute())) # Updated call
+    result: Result[Journal, Union[ParseError, str, ValueError]] = Journal.parse_from_file(
+        str(filename.absolute()), flat=flat, strip=strip, query=query
+    )
 
-    match parse_result:
-        case Success(journal):
-            process_result = parse_filter_strip(journal, flat, strip, query)
-            match process_result:
-                case Success(processed_journal):
-                    print(processed_journal.to_journal_string())
-                    exit(0)
-                case Failure(error):
-                    print(f"Error processing journal: {error}")
-                    exit(1)
+    match result:
+        case Success(processed_journal):
+            print(processed_journal.to_journal_string())
+            exit(0)
         case Failure(error):
-            print(f"Error parsing journal file: {error}")
+            print(f"Error processing journal: {error}")
             exit(1)
 
 
@@ -174,10 +144,8 @@ def find_capgain_non_crypto_txs(journal: Journal) -> list[Transaction]:
 )
 def find_positions_cmd(filename: Path):
     """Finds transactions that open or close positions."""
-    result: Result[Journal, ValueError] = flow(
-        str(filename.absolute()),
-        Journal.parse_from_file, # Updated call
-        bind(lambda journal: parse_filter_strip(journal, True, False, None))
+    result: Result[Journal, Union[ParseError, str, ValueError]] = Journal.parse_from_file(
+        str(filename.absolute()), flat=True, strip=False, query=None
     )
 
     match result:
@@ -219,10 +187,8 @@ def find_positions_cmd(filename: Path):
 )
 def balance_cmd(filename: Path):
     """Calculates and prints the current balance of all accounts."""
-    result: Result[Journal, ValueError] = flow(
-        str(filename.absolute()),
-        Journal.parse_from_file,
-        bind(lambda journal: parse_filter_strip(journal, True, False, None))
+    result: Result[Journal, Union[ParseError, str, ValueError]] = Journal.parse_from_file(
+        str(filename.absolute()), flat=True, strip=False, query=None
     )
 
     match result:
@@ -230,10 +196,8 @@ def balance_cmd(filename: Path):
             print(f"Error parsing journal file: {error}")
             exit(1)
         case Success(journal):
-            # Flatten the journal to ensure all transactions are processed for balance
-            flattened_journal = journal.flatten()
-            # Extract only Transaction objects from the flattened entries
-            transactions_only = [entry.transaction for entry in flattened_journal.entries if entry.transaction is not None]
+            # Extract only Transaction objects from the flattened entries (already flattened by parse_from_file)
+            transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
             balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
             # Format and print the balance sheet

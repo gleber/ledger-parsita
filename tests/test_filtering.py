@@ -12,8 +12,8 @@ from src.classes import (
     Tag,
 )
 from src.filtering import (
-    filter_entries,
     matches_query,
+    filter_entries,
     AccountFilter,
     DateFilter,
     DescriptionFilter,

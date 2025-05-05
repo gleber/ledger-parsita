@@ -752,12 +752,34 @@ class Journal(PositionAware["Journal"]):
         return Journal(entries=flattened_entries, source_location=self.source_location)
 
     @staticmethod
-    def parse_from_file(filename: str) -> Result["Journal", Union[ParseError, str]]:
-        """Parses an hledger journal file and returns a Journal object."""
+    def parse_from_file(filename: str, *, query: Optional["Filters"] = None, flat: bool = False, strip: bool = False) -> Result["Journal", Union[ParseError, str, ValueError]]:
+        """
+        Parses an hledger journal file and returns a Journal object.
+
+        Optionally filters, flattens, and strips location information.
+        """
         if not isinstance(filename, Path):
             filename = Path(filename)
 
-        # Use flow and bind to chain the file reading and parsing operations
+        # Define helper functions for the pipeline
+        def _apply_flatten(journal: Journal) -> Result[Journal, ValueError]:
+            if flat:
+                return Success(journal.flatten())
+            return Success(journal)
+
+        def _apply_strip(journal: Journal) -> Result[Journal, ValueError]:
+            if strip:
+                return Success(journal.strip_loc())
+            return Success(journal)
+
+        def _apply_filters_to_journal(journal: Journal) -> Result[Journal, ValueError]:
+            if query:
+                filtered_entries = query.apply_to_entries(journal.entries)
+                return Success(replace(journal, entries=filtered_entries))
+            return Success(journal)
+
+
+        # Use flow and bind to chain the file reading, parsing, and processing operations
         return flow(
             filename,
             Journal.read_file_content, # Use the static method
@@ -767,6 +789,9 @@ class Journal(PositionAware["Journal"]):
                 )
             ),
             bind(lambda journal: journal.recursive_include(filename)), # Use the instance method
+            bind(_apply_filters_to_journal), # Apply filtering
+            bind(_apply_flatten), # Apply flattening
+            bind(_apply_strip), # Apply stripping
         )
 
     @staticmethod

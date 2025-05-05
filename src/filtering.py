@@ -1,5 +1,6 @@
 # This file will contain the filtering logic for transactions.
 
+import click
 from typing import List, Optional, Union
 
 from parsita import lit, rep, reg, repsep, ParserContext, opt, ParseError
@@ -8,7 +9,7 @@ from src.classes import JournalEntry, Transaction, Posting, Amount, AccountName
 from datetime import date, datetime
 from decimal import Decimal
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from returns.result import Result, safe, Success, Failure
 from returns.curry import partial
 from abc import ABC, abstractmethod
@@ -165,6 +166,18 @@ def parse_query(query: str) -> Result[List[BaseFilter], ParseError]:
     """Parses a query string into a list of filter conditions using Result for error handling."""
     return parse_query_safe(query)
 
+@dataclass
+class Filters:
+    """Represents a collection of filter conditions."""
+    conditions: List[BaseFilter] = field(default_factory=list)
+
+    def apply_to_entries(self, entries: List[JournalEntry]) -> List[JournalEntry]:
+        """Applies the filter conditions to a list of journal entries."""
+        filtered_transactions = []
+        for entry in entries:
+            if entry.transaction and matches_query(entry.transaction, self.conditions):
+                filtered_transactions.append(entry)
+        return filtered_transactions
 
 def matches_query(transaction: Transaction, parsed_conditions: List[BaseFilter]) -> bool:
     """Checks if a single transaction matches the filter query string."""
@@ -173,14 +186,21 @@ def matches_query(transaction: Transaction, parsed_conditions: List[BaseFilter])
             return False
     return True # All conditions matched
 
-def _apply_filters(entries: List[JournalEntry], filters: List[BaseFilter]) -> List[JournalEntry]:
-    """Applies the parsed filter conditions to a list of journal entries."""
-    filtered_transactions = []
-    for entry in entries:
-        if entry.transaction and matches_query(entry.transaction, filters):
-            filtered_transactions.append(entry)
-    return filtered_transactions
-
 def filter_entries(entries: List[JournalEntry], query: str) -> Result[List[JournalEntry], ParseError]:
     """Filters a list of transactions based on a query string, returning a Result."""
-    return parse_query(query).map(lambda filters: _apply_filters(entries, filters))
+    return parse_query(query).map(lambda filters: Filters(conditions=filters).apply_to_entries(entries))
+
+class FilterListParamType(click.ParamType):
+    name = "filter_list"
+
+    def convert(self, value, param, ctx):
+        if value is None:
+            return None
+        result = parse_query(value)
+        match result:
+            case Success(filters):
+                return Filters(conditions=filters)
+            case Failure(error):
+                self.fail(f"Invalid query string: {error}", param, ctx)
+
+FILTER_LIST = FilterListParamType()

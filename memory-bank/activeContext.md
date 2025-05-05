@@ -65,6 +65,14 @@ This document outlines the current focus and active considerations for ledger-pa
     - Updated `tests/test_balance.py`, `tests/test_capital_gains.py`, `tests/test_capital_gains_fifo.py`, and `src/main.py` to use the new `build_balance_sheet_from_transactions` function.
     - Resolved `ModuleNotFoundError` and `ImportError` issues encountered during testing by using `python -m pytest` and correcting imports in test files and `src/main.py`.
     - Confirmed all 129 tests pass after refactoring.
+- Removed `parse_filter_strip` function from `src/main.py`.
+- Updated `Journal.parse_from_file` in `src/classes.py` to include filtering, flattening, and stripping logic via keyword-only arguments.
+- Updated CLI commands in `src/main.py` to use the new `Journal.parse_from_file` signature.
+- Implemented a custom `click.ParamType` (`FilterListParamType`) for the `--query` parameter, which now returns a `Filters` object. This class has been moved to `src/filtering.py`.
+- Created a `Filters` class in `src/filtering.py` containing a `List[BaseFilter]` and an `apply_to_entries()` method.
+- Removed the `_apply_filters` function from `src/filtering.py`.
+- Modified `Journal.parse_from_file` in `src/classes.py` to accept an optional `Filters` object and use its `apply_to_entries()` method for filtering.
+- Fixed an indentation error in `src/classes.py`.
 
 ## Next Steps
 

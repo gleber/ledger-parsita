@@ -31,7 +31,11 @@ This document describes the system architecture and key design patterns used in 
         - Updating the remaining quantity of matched lots.
         - **Applying the calculated gain/loss directly to the running balances of the appropriate income/expense accounts.**
         - **Storing detailed gain/loss results (`CapitalGainResult` objects) in the `capital_gains_realized` list within the `BalanceSheet`.**
-- **Filter Pattern:** A mechanism (`src/filtering.py`) for applying various criteria to filter transactions and postings.
+- **Filter Pattern:** A mechanism for applying various criteria to filter transactions and postings. This includes:
+    - Defining filter conditions, the `Filters` class, and the `FilterListParamType` in `src/filtering.py`.
+    - Using the `FilterListParamType` in `src/main.py` to parse filter strings from the command line into a `Filters` object.
+    - Passing the parsed `Filters` object directly to `Journal.parse_from_file` in `src/classes.py`.
+    - Using the `Filters.apply_to_entries()` method to filter journal entries.
 - **Journal Updater Pattern:** A component responsible for modifying the journal file in place (future implementation, potentially using stored `CapitalGainResult` data).
 - **Caching Pattern:** Utilized (`src/classes.py:SourceCacheManager`) for optimizing source position lookups during parsing.
 
@@ -43,7 +47,7 @@ This document describes the system architecture and key design patterns used in 
     - It identifies opening postings to create and track `Lot` objects.
     - Upon encountering closing postings, it performs FIFO matching against tracked lots, calculates gains/losses, updates lot quantities, and **updates the running balances of income/expense accounts directly within the `BalanceSheet` being built.** It also stores detailed `CapitalGainResult` objects in the `BalanceSheet`.
 - The final `BalanceSheet` produced by the builder contains all account balances (including the incrementally calculated capital gains/losses reflected in income/expense accounts) **and a list of detailed `CapitalGainResult` objects.**
-- The **Filter** component might be used by the CLI before passing the `Journal` to the builder.
+- The **CLI** now uses a custom `click.ParamType` to parse filter strings and passes the resulting `List[BaseFilter]` to `Journal.parse_from_file`.
 - The **Caching** mechanism is used internally by the **Parser** and related data classes (`PositionAware`).
 - The **Journal Updater** (future) might use stored `CapitalGainResult` data from the `BalanceSheet` to modify the journal file.
 
