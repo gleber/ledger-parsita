@@ -370,3 +370,73 @@ def test_calculate_capital_gains_insufficient_lots():
     assert result.proceeds.quantity == Decimal("750") # 5/10 * 1500
     assert result.gain_loss.quantity == Decimal("250") # 750 - 500
     assert result.gain_loss.commodity.name == "USD"
+
+def test_calculate_capital_gains_complex_fifo():
+    journal_string = """
+2023-01-01 * Buy ABC Lot 1
+    assets:stocks:ABC:20230101  10 ABC @@ 1000 USD
+    equity:opening-balances     -10 ABC
+    assets:cash                -1000 USD
+
+2023-01-05 * Buy ABC Lot 2
+    assets:stocks:ABC:20230105  15 ABC @@ 2250 USD
+    equity:opening-balances     -15 ABC
+    assets:cash                -2250 USD
+
+2023-01-10 * Buy ABC Lot 3
+    assets:stocks:ABC:20230110  5 ABC @@ 1000 USD
+    equity:opening-balances     -5 ABC
+    assets:cash                -1000 USD
+
+2023-01-15 * Sell ABC Part 1 (from Lot 1)
+    assets:stocks:ABC          -8 ABC
+    assets:cash                 1200 USD
+    income:capital-gains        -400 USD ; Example balancing
+
+2023-01-20 * Sell ABC Part 2 (from Lot 1 and Lot 2)
+    assets:stocks:ABC          -10 ABC
+    assets:cash                 1800 USD
+    income:capital-gains        -300 USD ; Example balancing
+
+2023-01-25 * Sell ABC Part 3 (from Lot 2 and Lot 3)
+    assets:stocks:ABC          -7 ABC
+    assets:cash                 1500 USD
+    income:capital-gains        -200 USD ; Example balancing
+"""
+    journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
+    transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
+    balance_sheet = calculate_balances_and_lots(transactions_only)
+    capital_gain_results = calculate_capital_gains(transactions_only, balance_sheet)
+
+    assert len(capital_gain_results) == 4 # 3 sales, matching against 1, 2, and 1 lots respectively
+
+    # Sale 1 (8 ABC from Lot 1)
+    result1 = capital_gain_results[0]
+    assert result1.matched_quantity.quantity == Decimal("8")
+    assert result1.cost_basis.quantity == Decimal("800") # 8/10 * 1000
+    assert result1.proceeds.quantity == Decimal("1200") # 8/8 * 1200
+    assert result1.gain_loss.quantity == Decimal("400") # 1200 - 800
+    assert result1.gain_loss.commodity.name == "USD"
+
+    # Sale 2 (2 ABC from Lot 1, 8 ABC from Lot 2)
+    result2 = capital_gain_results[1]
+    assert result2.matched_quantity.quantity == Decimal("2")
+    assert result2.cost_basis.quantity == Decimal("200") # 2/10 * 1000
+    assert result2.proceeds.quantity == pytest.approx(Decimal("360")) # 2/10 * 1800
+    assert result2.gain_loss.quantity == pytest.approx(Decimal("160")) # 360 - 200
+    assert result2.gain_loss.commodity.name == "USD"
+
+    result3 = capital_gain_results[2]
+    assert result3.matched_quantity.quantity == Decimal("8")
+    assert result3.cost_basis.quantity == pytest.approx(Decimal("1200")) # 8/15 * 2250
+    assert result3.proceeds.quantity == pytest.approx(Decimal("1440")) # 8/10 * 1800
+    assert result3.gain_loss.quantity == pytest.approx(Decimal("240")) # 1440 - 1200
+    assert result3.gain_loss.commodity.name == "USD"
+
+    # Sale 3 (7 ABC from Lot 2)
+    result4 = capital_gain_results[3]
+    assert result4.matched_quantity.quantity == Decimal("7")
+    assert result4.cost_basis.quantity == pytest.approx(Decimal("1050")) # 7/15 * 2250
+    assert result4.proceeds.quantity == pytest.approx(Decimal("1500")) # 7/7 * 1500
+    assert result4.gain_loss.quantity == pytest.approx(Decimal("450")) # 1500 - 1050
+    assert result4.gain_loss.commodity.name == "USD"
