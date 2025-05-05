@@ -18,7 +18,7 @@ from src.classes import (
     CapitalGainResult # Import CapitalGainResult
 )
 
-from src.balance import calculate_balances_and_lots, BalanceSheet, Lot, Account, Balance, CashBalance, AssetBalance
+from src.balance import BalanceSheet, Lot, Account, Balance, CashBalance, AssetBalance # Updated import
 from src.hledger_parser import parse_hledger_journal_content
 
 # Moved and adapted tests from test_capital_gains_fifo.py
@@ -37,7 +37,7 @@ def test_calculate_balances_and_lots_simple_capital_gain():
 """
     journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = calculate_balances_and_lots(transactions_only)
+    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
@@ -75,7 +75,7 @@ def test_calculate_balances_and_lots_multiple_opens_single_close():
 """
     journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = calculate_balances_and_lots(transactions_only)
+    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
@@ -121,7 +121,7 @@ def test_calculate_balances_and_lots_single_open_multiple_closes():
 """
     journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = calculate_balances_and_lots(transactions_only)
+    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
@@ -168,7 +168,7 @@ def test_calculate_balances_and_lots_multiple_assets():
 """
     journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = calculate_balances_and_lots(transactions_only)
+    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
@@ -208,7 +208,7 @@ def test_calculate_balances_and_lots_excludes_non_asset_closing_postings():
 """
     journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = calculate_balances_and_lots(transactions_only)
+    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # No capital gains should be calculated for non-asset closing postings
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
@@ -239,7 +239,7 @@ def test_calculate_balances_and_lots_handles_undated_open_accounts():
 """
     journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = calculate_balances_and_lots(transactions_only)
+    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
@@ -272,7 +272,7 @@ def test_calculate_balances_and_lots_partial_match_gain():
 """
     journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = calculate_balances_and_lots(transactions_only)
+    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
@@ -306,7 +306,7 @@ def test_calculate_balances_and_lots_multiple_postings_same_commodity():
 """
     journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = calculate_balances_and_lots(transactions_only)
+    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
@@ -347,7 +347,7 @@ def test_calculate_balances_and_lots_multiple_cash_postings():
 """
     journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = calculate_balances_and_lots(transactions_only)
+    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
@@ -381,7 +381,7 @@ def test_calculate_balances_and_lots_insufficient_lots():
 """
     journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = calculate_balances_and_lots(transactions_only)
+    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
@@ -434,7 +434,7 @@ def test_calculate_balances_and_lots_complex_fifo():
 """
     journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = calculate_balances_and_lots(transactions_only)
+    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))

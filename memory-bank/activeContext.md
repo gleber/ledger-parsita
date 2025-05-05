@@ -5,7 +5,8 @@ This document outlines the current focus and active considerations for ledger-pa
 ## Current Work Focus
 
 - **Completed Phase 1: Integrated Capital Gains Calculation into Balance Sheet Builder.**
-- Preparing for Phase 2: Future Steps.
+- Starting Phase 2: Improvements.
+- Preparing for Phase 3: Future Steps.
 
 ## Recent Changes
 
@@ -57,8 +58,19 @@ This document outlines the current focus and active considerations for ledger-pa
     - Fixed `IndentationError` in `tests/test_main.py` introduced during the previous fix.
     - Fixed `IndentationError` and Mypy errors in `src/balance.py` introduced during `replace_in_file` operations by using `write_to_file`.
     - Confirmed all tests pass after fixes.
+- **Refactored Balance Calculation:**
+    - Split the `calculate_balances_and_lots` function into:
+        - `BalanceSheet.apply_transaction`: An instance method for incremental updates based on a single transaction.
+        - `build_balance_sheet_from_transactions`: A function using `functools.reduce` to apply the incremental method over a list of transactions.
+    - Updated `tests/test_balance.py`, `tests/test_capital_gains.py`, `tests/test_capital_gains_fifo.py`, and `src/main.py` to use the new `build_balance_sheet_from_transactions` function.
+    - Resolved `ModuleNotFoundError` and `ImportError` issues encountered during testing by using `python -m pytest` and correcting imports in test files and `src/main.py`.
+    - Confirmed all 129 tests pass after refactoring.
 
 ## Next Steps
+
+**Phase 1: Improvements**
+
+- Check existing test files for adherence to the 500-line limit and split if necessary.
 
 **Phase 2: Future Steps**
 - Design and implement the mechanism for generating new journal entries for capital gains transactions (potentially using stored `CapitalGainResult` data).
@@ -73,6 +85,7 @@ This document outlines the current focus and active considerations for ledger-pa
 - **Structure and storage of `CapitalGainResult` objects: Stored as a list (`capital_gains_realized`) within the `BalanceSheet` object.**
 - Design of the filtering API.
 - Implementation details of the in-memory caching for source position lookups.
+- **Successfully refactored `build_balance_sheet_from_transactions` into the static method `BalanceSheet.from_transactions`.**
 
 ## Important Patterns and Preferences
 

@@ -13,7 +13,7 @@ from parsita import ParseError
 from src.classes import Posting, Transaction, sl
 from returns.result import Result, Success, Failure
 from src.capital_gains import find_open_transactions, find_close_transactions
-from src.balance import calculate_balances_and_lots # Import calculate_balances_and_lots
+from src.balance import BalanceSheet # Updated import
 from returns.pipeline import (flow)
 from returns.pointfree import (bind)
 
@@ -235,7 +235,7 @@ def balance_cmd(filename: Path):
             flattened_journal = journal.flatten()
             # Extract only Transaction objects from the flattened entries
             transactions_only = [entry.transaction for entry in flattened_journal.entries if entry.transaction is not None]
-            balance_sheet = calculate_balances_and_lots(transactions_only) # calculate_balances_and_lots now returns only the balance_sheet
+            balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
             # Format and print the balance sheet
             click.echo("Current Balances:")

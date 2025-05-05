@@ -19,7 +19,7 @@ from src.capital_gains import (
     find_open_transactions,
     find_close_transactions,
 )
-from src.balance import calculate_balances_and_lots, BalanceSheet # Import necessary functions and classes
+from src.balance import BalanceSheet # Updated import
 
 
 # Helper function to create a simple journal for testing

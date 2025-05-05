@@ -30,6 +30,11 @@ This document tracks the progress, completed features, and remaining tasks for l
     - CLI command `balance` in `src/main.py` updated to display capital gains from the `BalanceSheet`.
     - Tests moved and adapted to `tests/test_balance.py` to verify integrated logic.
     - All tests pass after fixing issues related to the integration (`AttributeError`, `AssertionError`, `IndentationError`, Mypy errors).
+- **Refactored Balance Calculation:**
+    - Split `calculate_balances_and_lots` into `BalanceSheet.apply_transaction` (incremental) and `build_balance_sheet_from_transactions` (using `reduce`).
+    - Updated all relevant tests and `src/main.py` to use the new function.
+    - All tests pass after refactoring.
+- Refactored `build_balance_sheet_from_transactions` into the static method `BalanceSheet.from_transactions`.
 
 ## What's Left to Build
 
@@ -43,6 +48,7 @@ This document tracks the progress, completed features, and remaining tasks for l
 ## Current Status
 
 - **Phase 1 (Integration of Capital Gains Calculation into Balance Sheet Builder) is complete.**
+- **Refactoring of balance calculation logic is complete.**
 - The performance optimization for source position lookups during parsing has been completed and verified by passing tests.
 - Ready to begin Phase 2 (Generating journal entries, updating files).
 
