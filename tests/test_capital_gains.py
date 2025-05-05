@@ -18,8 +18,6 @@ from src.classes import (
 from src.capital_gains import (
     find_open_transactions,
     find_close_transactions,
-    calculate_capital_gains, # Import the new function
-    CapitalGainResult # Import the new dataclass
 )
 from src.balance import calculate_balances_and_lots, BalanceSheet # Import necessary functions and classes
 
@@ -273,4 +271,3 @@ def test_find_close_transactions_excludes_cash():
     # Expected close transaction is the first one (AAPL), cash transactions should be excluded
     assert len(close_txns) == 1
     assert close_txns[0].payee == "Sell AAPL"
-

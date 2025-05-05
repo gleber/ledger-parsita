@@ -5,7 +5,7 @@ This document describes the system architecture and key design patterns used in 
 ## Architecture
 
 - The system follows a modular design, with separate modules for parsing and filtering.
-- **Capital gains tracking is integrated directly into the balance sheet building process.**
+- **Capital gains tracking is integrated directly into the balance sheet building process.** This is the **implemented architecture**.
 - Input hledger journal files are processed chronologically.
 - The balance sheet builder reads the entire journal to establish the history of asset acquisitions and dispositions, calculating gains/losses incrementally.
 
@@ -14,7 +14,7 @@ This document describes the system architecture and key design patterns used in 
 - Using Python for development due to its suitability for text processing and data manipulation.
 - Using the `parsita` library for parsing the hledger journal format.
 - Using the `returns` library for error handling.
-- **Implementing a robust FIFO logic by iterating through transactions to find sales and matching them against lots stored in the `BalanceSheet`.**
+- **Implemented a robust FIFO logic by iterating through transactions to find sales and matching them against lots stored in the `BalanceSheet`. This logic is now integrated into the Balance Sheet Builder.**
 - **Designing a mechanism for safely updating the hledger journal file in place (future step).**
 - **Implemented an in-memory caching mechanism for source position lookups to improve parsing performance.**
 - **Each test file must contain at most 500 lines of code; if a file is longer, it should be split into multiple files.**
@@ -30,7 +30,7 @@ This document describes the system architecture and key design patterns used in 
         - Calculating cost basis, proceeds, and gain/loss for matched portions.
         - Updating the remaining quantity of matched lots.
         - **Applying the calculated gain/loss directly to the running balances of the appropriate income/expense accounts.**
-        - Optionally storing detailed gain/loss results (`CapitalGainResult`).
+        - **Storing detailed gain/loss results (`CapitalGainResult` objects) in the `capital_gains_realized` list within the `BalanceSheet`.**
 - **Filter Pattern:** A mechanism (`src/filtering.py`) for applying various criteria to filter transactions and postings.
 - **Journal Updater Pattern:** A component responsible for modifying the journal file in place (future implementation, potentially using stored `CapitalGainResult` data).
 - **Caching Pattern:** Utilized (`src/classes.py:SourceCacheManager`) for optimizing source position lookups during parsing.
@@ -41,8 +41,8 @@ This document describes the system architecture and key design patterns used in 
 - The `Journal` object is passed to the **Balance Sheet Builder** (`calculate_balances_and_lots`).
 - The **Balance Sheet Builder** iterates through the `Journal`'s transactions:
     - It identifies opening postings to create and track `Lot` objects.
-    - Upon encountering closing postings, it performs FIFO matching against tracked lots, calculates gains/losses, updates lot quantities, and **updates the running balances of income/expense accounts directly within the `BalanceSheet` being built.**
-- The final `BalanceSheet` produced by the builder contains all account balances, including the incrementally calculated capital gains/losses reflected in income/expense accounts.
+    - Upon encountering closing postings, it performs FIFO matching against tracked lots, calculates gains/losses, updates lot quantities, and **updates the running balances of income/expense accounts directly within the `BalanceSheet` being built.** It also stores detailed `CapitalGainResult` objects in the `BalanceSheet`.
+- The final `BalanceSheet` produced by the builder contains all account balances (including the incrementally calculated capital gains/losses reflected in income/expense accounts) **and a list of detailed `CapitalGainResult` objects.**
 - The **Filter** component might be used by the CLI before passing the `Journal` to the builder.
 - The **Caching** mechanism is used internally by the **Parser** and related data classes (`PositionAware`).
 - The **Journal Updater** (future) might use stored `CapitalGainResult` data from the `BalanceSheet` to modify the journal file.
@@ -55,6 +55,7 @@ This document describes the system architecture and key design patterns used in 
     - Correct updating of remaining lot quantities.
     - Accurate calculation of proceeds, cost basis, and gain/loss for each matched portion.
     - **Correct application of calculated gains/losses to the running balances of income/expense accounts.**
+    - **Correct storage of detailed `CapitalGainResult` objects within the `BalanceSheet`.**
 - Safe and reliable in-place modification of the journal file (future).
 - Designing a flexible and performant filtering engine.
 - Ensuring the caching mechanism provides significant performance improvements for large journals.

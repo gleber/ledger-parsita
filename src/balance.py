@@ -1,8 +1,10 @@
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Dict, List, Union
+import datetime
+from datetime import date # Import date specifically for type hints if needed
 
-from src.classes import AccountName, Amount, Commodity, Posting, Transaction, CostKind, CommodityKind # Import CommodityKind
+from src.classes import AccountName, Amount, Commodity, Posting, Transaction, CostKind, CommodityKind, CapitalGainResult # Import CapitalGainResult
 
 @dataclass
 class Lot:
@@ -106,6 +108,7 @@ class Account:
 class BalanceSheet:
     """Represents the balance sheet with accounts and their balances."""
     accounts: Dict[AccountName, Account] = field(default_factory=dict)
+    capital_gains_realized: List[CapitalGainResult] = field(default_factory=list) # Store realized capital gains
 
     def get_account(self, account_name: AccountName) -> Account:
         """Gets or creates an Account object for a given account name."""
@@ -134,17 +137,19 @@ class BalanceSheet:
         account.add_lot(commodity, lot)
 
 
-def calculate_balances_and_lots(transactions: List[Transaction]) -> BalanceSheet:
+def calculate_balances_and_lots(transactions: List[Transaction]) -> BalanceSheet: # Return only BalanceSheet
     """
     Calculates the balance of each account and tracks asset lots, returning a BalanceSheet.
+    Integrates incremental capital gains calculation and stores results in the BalanceSheet.
 
     Args:
         transactions: A list of Transaction objects.
 
     Returns:
-        A BalanceSheet containing accounts, their balances, and associated lots.
+        A BalanceSheet containing accounts, their balances, associated lots, and realized capital gains.
     """
     balance_sheet = BalanceSheet()
+    capital_gain_results: List[CapitalGainResult] = [] # List to store capital gain results
 
     # Sort transactions by date to ensure correct FIFO processing
     sorted_transactions = sorted(transactions, key=lambda t: t.date)
@@ -163,7 +168,6 @@ def calculate_balances_and_lots(transactions: List[Transaction]) -> BalanceSheet
                 if isinstance(balance, CashBalance):
                      balance.add_posting(posting) # Call the new add_posting method
                 # For AssetBalance, total_amount is updated when lots are added, not by postings here
-
 
         # After processing all postings in a transaction, check for asset acquisitions and track lots
         acquisition_posting = transaction.get_asset_acquisition_posting()
@@ -184,7 +188,7 @@ def calculate_balances_and_lots(transactions: List[Transaction]) -> BalanceSheet
 
                     if cost_basis_per_unit:
                         lot = Lot(
-                            acquisition_date=str(transaction.date), # Use transaction date as acquisition date
+                            acquisition_date=str(transaction.date), # Use transaction date as acquisition date string
                             quantity=acquisition_posting.amount, # Use quantity from the acquisition posting
                             cost_basis_per_unit=cost_basis_per_unit,
                             original_posting=acquisition_posting
@@ -194,5 +198,130 @@ def calculate_balances_and_lots(transactions: List[Transaction]) -> BalanceSheet
                         account_name = acquisition_posting.account # Get account name from acquisition posting
                         balance_sheet.add_lot_to_account(account_name, acquisition_posting.amount.commodity, lot)
 
+        # --- Capital Gains Calculation (Integrated) ---
+        # Check for closing postings (sales) after processing all postings in the transaction
+        for posting in transaction.postings:
+            if posting.isClosing():
+                closing_account = posting.account
+                closing_commodity = posting.amount.commodity if posting.amount else None
+                closing_quantity = abs(posting.amount.quantity) if posting.amount else Decimal(0)
 
-    return balance_sheet
+                if closing_commodity and closing_quantity > 0:
+                    # Find proceeds for this closing posting within the same transaction
+                    total_proceeds = Amount(Decimal(0), Commodity("")) # Initialize with zero amount and empty commodity
+                    proceeds_found = False
+                    for other_posting in transaction.postings:
+                        if other_posting != posting and other_posting.amount and other_posting.amount.quantity > 0 and other_posting.amount.commodity.isCash():
+                             if total_proceeds.commodity.name == "": # Set commodity on first cash posting
+                                total_proceeds = Amount(total_proceeds.quantity + other_posting.amount.quantity, other_posting.amount.commodity)
+                             elif total_proceeds.commodity == other_posting.amount.commodity:
+                                total_proceeds.quantity += other_posting.amount.quantity
+                             else:
+                                 # Handle multiple cash commodities in one transaction if necessary, or raise error
+                                 print(f"Warning: Multiple cash commodities in transaction {transaction.date} - {transaction.payee}. Only summing {total_proceeds.commodity.name}.")
+                                 total_proceeds.quantity += other_posting.amount.quantity # Still sum, but warn
+                             proceeds_found = True
+
+                    if not proceeds_found:
+                         print(f"Warning: No cash proceeds found for closing posting in transaction {transaction.date} - {transaction.payee} for {closing_quantity} {closing_commodity.name} from {closing_account.name}.")
+                         # Depending on requirements, might skip this posting or handle differently
+
+                    quantity_to_match = closing_quantity
+
+                    # Collect all relevant AssetBalance objects for the closing commodity under the closing account and its children
+                    # Use the current state of the balance_sheet being built
+                    relevant_asset_balances: List[AssetBalance] = []
+                    for account_name, account_data in balance_sheet.accounts.items():
+                        # Check if the account is the closing account or a child account
+                        if account_name.name.startswith(closing_account.name):
+                            for commodity_name, balance in account_data.balances.items():
+                                if isinstance(balance, AssetBalance) and balance.commodity == closing_commodity:
+                                     relevant_asset_balances.append(balance)
+
+                    if relevant_asset_balances:
+                        # Combine lots from all relevant balances and sort by acquisition date
+                        all_relevant_lots: List[Lot] = []
+                        for balance in relevant_asset_balances:
+                            # Only consider lots from the *current* state of the balance sheet
+                            all_relevant_lots.extend(balance.lots)
+
+                        # Sort lots by acquisition date (FIFO)
+                        sorted_lots = sorted(all_relevant_lots, key=lambda lot: datetime.datetime.strptime(lot.acquisition_date, '%Y-%m-%d').date())
+
+                        # Perform FIFO matching
+                        for current_lot in sorted_lots:
+                            if quantity_to_match <= 0:
+                                break # Stop if the closing quantity is fully matched
+
+                            if current_lot.remaining_quantity > 0:
+                                match_quantity_decimal = min(quantity_to_match, current_lot.remaining_quantity)
+                                match_quantity_amount = Amount(match_quantity_decimal, closing_commodity)
+
+                                # Calculate cost basis for the matched quantity
+                                cost_basis_decimal = match_quantity_decimal * current_lot.cost_basis_per_unit.quantity
+                                cost_basis_amount = Amount(cost_basis_decimal, current_lot.cost_basis_per_unit.commodity)
+
+                                # Calculate proceeds for the matched quantity (pro-rata)
+                                proceeds_decimal = (match_quantity_decimal / closing_quantity) * total_proceeds.quantity if closing_quantity != 0 else Decimal(0)
+                                proceeds_amount = Amount(proceeds_decimal, total_proceeds.commodity)
+
+                                # Calculate gain/loss
+                                # Ensure both amounts are in the same currency for calculation
+                                if cost_basis_amount.commodity != proceeds_amount.commodity:
+                                     print(f"Warning: Cost basis commodity ({cost_basis_amount.commodity.name}) and proceeds commodity ({proceeds_amount.commodity.name}) differ for match in transaction {transaction.date} - {transaction.payee}. Cannot calculate gain/loss directly.")
+                                     gain_loss_amount = Amount(Decimal(0), Commodity("")) # Cannot calculate if currencies differ
+                                else:
+                                    gain_loss_decimal = proceeds_decimal - cost_basis_decimal
+                                    gain_loss_amount = Amount(gain_loss_decimal, proceeds_amount.commodity)
+
+                                # Determine acquisition date from the lot's acquisition_date string
+                                try:
+                                    # Use datetime.date directly if available, otherwise parse string
+                                    if isinstance(current_lot.acquisition_date, date):
+                                        acquisition_date_obj = current_lot.acquisition_date
+                                    else:
+                                        acquisition_date_obj = datetime.datetime.strptime(current_lot.acquisition_date, '%Y-%m-%d').date()
+                                except ValueError:
+                                    print(f"Warning: Could not parse acquisition date '{current_lot.acquisition_date}' for lot. Using date.min.")
+                                    acquisition_date_obj = date.min # Use date.min as fallback
+
+                                # Create and append CapitalGainResult with correct arguments and indentation
+                                capital_gain_results.append(CapitalGainResult(
+                                    closing_posting=posting,
+                                    opening_lot_original_posting=current_lot.original_posting,
+                                    matched_quantity=match_quantity_amount,
+                                    cost_basis=cost_basis_amount,
+                                    proceeds=proceeds_amount,
+                                    gain_loss=gain_loss_amount,
+                                    closing_date=transaction.date, # Get closing date from the current transaction
+                                    acquisition_date=acquisition_date_obj # Use determined acquisition date object
+                                ))
+
+                                # Update remaining quantity in the lot (within the balance_sheet being built)
+                                current_lot.remaining_quantity -= match_quantity_decimal
+                                quantity_to_match -= match_quantity_decimal
+
+                                # --- Apply Gain/Loss to Running Balances ---
+                                # Determine the appropriate gain/loss account
+                                if gain_loss_amount.quantity > 0:
+                                    gain_loss_account_name = AccountName(["income", "capital_gains"]) # Example account
+                                    # Credit the income account
+                                    balance_sheet.update_balance(gain_loss_account_name, gain_loss_amount)
+                                    # Debit the asset account (this is already handled by the posting itself)
+                                elif gain_loss_amount.quantity < 0:
+                                    gain_loss_account_name = AccountName(["expenses", "capital_losses"]) # Example account
+                                    # Debit the expense account (use absolute value for debit)
+                                    balance_sheet.update_balance(gain_loss_account_name, gain_loss_amount)
+                                    # Credit the asset account (this is already handled by the posting itself)
+
+
+                        if quantity_to_match > 0:
+                            print(f"Warning: Not enough open lots found for {closing_quantity} {closing_commodity.name} in {closing_account.name} to match closing posting in transaction {transaction.date} - {transaction.payee}. Remaining quantity to match: {quantity_to_match}")
+
+                    else:
+                        print(f"Warning: Could not find any relevant AssetBalance for {closing_account.name}:{closing_commodity.name} to perform FIFO matching.")
+
+    # Store the capital_gain_results list in the BalanceSheet object
+    balance_sheet.capital_gains_realized = capital_gain_results
+
+    return balance_sheet # Return the updated BalanceSheet

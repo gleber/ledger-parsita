@@ -4,7 +4,8 @@ This document outlines the current focus and active considerations for ledger-pa
 
 ## Current Work Focus
 
-- Refactoring the balance sheet building process (`src/balance.py`) to integrate incremental capital gains calculation.
+- **Completed Phase 1: Integrated Capital Gains Calculation into Balance Sheet Builder.**
+- Preparing for Phase 2: Future Steps.
 
 ## Recent Changes
 
@@ -36,21 +37,28 @@ This document outlines the current focus and active considerations for ledger-pa
 - Added `isCrypto()` method to `Commodity` class in `src/classes.py` and added tests for it in `tests/test_classes.py`.
 - Fixed `AttributeError: 'Account' object has no attribute 'isAsset'` in `src/main.py` by accessing `account.name.isAsset()`.
 - Added a rule that each test file must contain at most 500 lines of code.
+- **Completed Phase 1: Integrated Capital Gains Calculation into Balance Sheet Builder.**
+    - Moved core FIFO matching and gain/loss calculation logic from `src/capital_gains.py` into `src/balance.py::calculate_balances_and_lots`.
+    - Modified `src/balance.py::calculate_balances_and_lots` to incrementally apply calculated gains/losses to income/expense account balances within the `BalanceSheet` being built.
+    - Moved the `CapitalGainResult` dataclass from `src/capital_gains.py` to `src/classes.py`.
+    - Removed the now redundant `calculate_capital_gains` function from `src/capital_gains.py`.
+    - Moved and adapted tests from `tests/test_capital_gains_fifo.py` to `tests/test_balance.py` to verify the integrated calculation and its impact on balances and lot quantities.
+    - Removed unused imports from `tests/test_capital_gains_fifo.py`.
+    - Fixed a syntax error in `tests/test_capital_gains_fifo.py` related to decimal literals.
+- **Stored Capital Gains Results in BalanceSheet:**
+    - Added `capital_gains_realized: List[CapitalGainResult]` field to `BalanceSheet` dataclass in `src/balance.py`.
+    - Modified `calculate_balances_and_lots` in `src/balance.py` to populate this list and return only the `BalanceSheet`.
+    - Added `closing_date` and `acquisition_date` fields to `CapitalGainResult` in `src/classes.py`.
+    - Updated `calculate_balances_and_lots` to populate these date fields in `CapitalGainResult`.
+    - Updated `balance_cmd` in `src/main.py` to access `capital_gains_realized` from the `BalanceSheet` object for printing.
+    - Fixed `AttributeError` in `src/main.py` by using the new date fields from `CapitalGainResult`.
+    - Fixed Mypy errors in `src/main.py` caused by variable shadowing (`result`).
+    - Fixed `AssertionError` in `tests/test_main.py::test_cli_balance_command` by updating the expected output string to include the capital gains section.
+    - Fixed `IndentationError` in `tests/test_main.py` introduced during the previous fix.
+    - Fixed `IndentationError` and Mypy errors in `src/balance.py` introduced during `replace_in_file` operations by using `write_to_file`.
+    - Confirmed all tests pass after fixes.
 
 ## Next Steps
-
-**Phase 1: Integrate Capital Gains Calculation into Balance Sheet Builder**
-1.  **Move Logic:** Transfer the core FIFO matching and gain/loss calculation logic from `src/capital_gains.py::calculate_capital_gains` into `src/balance.py`, likely as a helper function called by `calculate_balances_and_lots`.
-2.  **Modify `calculate_balances_and_lots` (`src/balance.py`):**
-    *   Integrate the call to the moved FIFO logic when a closing posting is encountered.
-    *   Ensure the logic correctly updates the `remaining_quantity` of lots tracked within the `BalanceSheet` state.
-    *   **Implement the application of calculated gains/losses to the running balances of appropriate income/expense accounts (e.g., `income:capital_gains`, `expenses:capital_losses`) within the `BalanceSheet` object being built.**
-    *   Optionally, add logic to store `CapitalGainResult` objects in the `BalanceSheet`.
-3.  **Refactor/Remove `src/capital_gains.py`:** Remove the now redundant `calculate_capital_gains` function. Decide whether to keep/move `CapitalGainResult`.
-4.  **Update `BalanceSheet` Class (Optional):** Consider adding `capital_gains_realized: List[CapitalGainResult]` field in `src/classes.py`.
-5.  **Update Tests:**
-    *   Adapt/move tests from `tests/test_capital_gains_fifo.py` to `tests/test_balance.py`.
-    *   Add new tests in `tests/test_balance.py` to verify the integrated calculation and its impact on income/expense balances and lot quantities.
 
 **Phase 2: Future Steps**
 - Design and implement the mechanism for generating new journal entries for capital gains transactions (potentially using stored `CapitalGainResult` data).
@@ -59,10 +67,10 @@ This document outlines the current focus and active considerations for ledger-pa
 
 ## Active Decisions and Considerations
 
-- **Integrating capital gains calculation directly into the balance sheet building process.**
-- How to efficiently track lots and apply gains/losses to running balances within `calculate_balances_and_lots`.
-- Determining the appropriate income/expense accounts for posting gains/losses (e.g., `income:capital_gains`, `expenses:capital_losses`).
-- Structure and storage of `CapitalGainResult` objects if needed for future journal updates.
+- **Successfully integrated capital gains calculation directly into the balance sheet building process.**
+- How to efficiently track lots and apply gains/losses to running balances within `calculate_balances_and_lots`. (Implemented)
+- Determining the appropriate income/expense accounts for posting gains/losses (e.g., `income:capital_gains`, `expenses:capital_losses`). (Implemented within `calculate_balances_and_lots`)
+- **Structure and storage of `CapitalGainResult` objects: Stored as a list (`capital_gains_realized`) within the `BalanceSheet` object.**
 - Design of the filtering API.
 - Implementation details of the in-memory caching for source position lookups.
 
@@ -79,3 +87,6 @@ This document outlines the current focus and active considerations for ledger-pa
 - Successfully refactored existing `unittest` tests to `pytest` style, improving test readability and maintainability.
 - Gained experience in implementing and integrating in-memory caching for performance optimization.
 - Encountered and resolved issues related to file path handling and import mechanisms during development.
+- Successfully refactored core logic to integrate capital gains calculation into the balance sheet building process.
+- Adapted existing tests to verify the new integrated logic.
+- Resolved test failures (`AttributeError`, `AssertionError`, `IndentationError`, Mypy errors) related to storing `CapitalGainResult` in `BalanceSheet`, including fixing variable shadowing.

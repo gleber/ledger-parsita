@@ -12,7 +12,7 @@ import re
 from parsita import ParseError
 from src.classes import Posting, Transaction, sl
 from returns.result import Result, Success, Failure
-from src.capital_gains import find_open_transactions, find_close_transactions, calculate_capital_gains # Import calculate_capital_gains
+from src.capital_gains import find_open_transactions, find_close_transactions
 from src.balance import calculate_balances_and_lots # Import calculate_balances_and_lots
 from returns.pipeline import (flow)
 from returns.pointfree import (bind)
@@ -168,81 +168,6 @@ def find_capgain_non_crypto_txs(journal: Journal) -> list[Transaction]:
     return restxs
 
 
-
-# Define the capgains command
-@cli.command("capgains")
-@click.argument(
-    "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
-)
-def capgains_cmd(filename: Path):
-    """Finds transactions opening positions using non-dated subaccounts."""
-    result: Result[Journal, ValueError] = flow(
-        str(filename.absolute()),
-        parse_hledger_journal,
-        bind(lambda journal: parse_filter_strip(journal, True, False, None))
-    )
-    journal = result.unwrap()
-    capgains_tx = find_capgain_non_crypto_txs(journal)
-
-    click.echo("\nTransactions with capgains:", err=True)
-    for transaction in capgains_tx:
-        # Access attributes directly from the Transaction object
-        sl = transaction.source_location
-        #line_info = f"(at {sl.filename}:{sl.line}:{sl.column})" if sl else "(Line N/A)"
-        line_info = f"{sl.filename}:{sl.line}:{sl.column}" if sl else "(Line N/A)"
-        side = transaction.side()
-        # click.echo(f"- {transaction.date} {side} {transaction.payee} {line_info}")
-        click.echo(f"; {line_info}")
-        click.echo(transaction.to_journal_string())
-        click.echo(f"")
-
-    # Exit with a zero status code on success
-    exit(0)
-
-
-# Define the find-non-dated-opens command
-@cli.command("find-non-dated-opens")
-@click.argument(
-    "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
-)
-def find_non_dated_opens_cmd(filename: Path):
-    """Finds transactions opening positions using non-dated subaccounts."""
-    result: Result[Journal, ValueError] = flow(
-        str(filename.absolute()),
-        parse_hledger_journal,
-        bind(lambda journal: parse_filter_strip(journal, True, False, None))
-    )
-    match result:
-        case Failure(error):
-            # Print the error message from the Failure and exit with a non-zero status code
-            print(f"Error parsing journal file: {error}")
-            exit(1)
-        case Success(journal):
-            # If parsing was successful, unwrap the result and proceed
-            parsed_data: Journal = journal
-            click.echo(f"Successfully parsed hledger journal: {filename}", err=True)
-
-    non_dated_opens = find_non_dated_stock_txs(parsed_data)
-
-    if non_dated_opens:
-        click.echo("\nTransactions positions with non-dated subaccounts:", err=True)
-        for transaction in non_dated_opens:
-            # Access attributes directly from the Transaction object
-            sl = transaction.source_location
-            #line_info = f"(at {sl.filename}:{sl.line}:{sl.column})" if sl else "(Line N/A)"
-            line_info = f"{sl.filename}:{sl.line}:{sl.column}" if sl else "(Line N/A)"
-            side = transaction.side()
-            # click.echo(f"- {transaction.date} {side} {transaction.payee} {line_info}")
-            click.echo(f"; {line_info}")
-            click.echo(transaction.to_journal_string())
-            click.echo(f"")
-    else:
-        click.echo("\nNo transactions found positions with non-dated subaccounts.")
-
-    # Exit with a zero status code on success
-    exit(0)
-
-
 # Define the find-positions command
 @cli.command("find-positions")
 @click.argument(
@@ -310,7 +235,7 @@ def balance_cmd(filename: Path):
             flattened_journal = journal.flatten()
             # Extract only Transaction objects from the flattened entries
             transactions_only = [entry.transaction for entry in flattened_journal.entries if entry.transaction is not None]
-            balance_sheet = calculate_balances_and_lots(transactions_only)
+            balance_sheet = calculate_balances_and_lots(transactions_only) # calculate_balances_and_lots now returns only the balance_sheet
 
             # Format and print the balance sheet
             click.echo("Current Balances:")
@@ -324,53 +249,24 @@ def balance_cmd(filename: Path):
                 for commodity, balance in sorted(account.balances.items(), key=lambda x: str(x[0])):
                     click.echo(f"  {balance.total_amount}")
 
-    exit(0)
-
-
-# Define the calculate-capgains command
-@cli.command("calculate-capgains")
-@click.argument(
-    "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
-)
-def calculate_capgains_cmd(filename: Path):
-    """Calculates and reports capital gains and losses."""
-    result: Result[Journal, ValueError] = flow(
-        str(filename.absolute()),
-        parse_hledger_journal,
-        bind(lambda journal: parse_filter_strip(journal, True, False, None)) # Flatten and process journal
-    )
-
-    match result:
-        case Failure(error):
-            print(f"Error parsing journal file: {error}")
-            exit(1)
-        case Success(journal):
-            # Extract only Transaction objects from the flattened entries
-            transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-            
-            # Calculate balances and lots
-            balance_sheet = calculate_balances_and_lots(transactions_only)
-
-            # Calculate capital gains
-            capital_gain_results = calculate_capital_gains(transactions_only, balance_sheet)
-
-            # Print the results
+            # Print Capital Gains Results from the BalanceSheet object
             click.echo("\nCapital Gains Results:")
-            if capital_gain_results:
-                for result in capital_gain_results:
-                    closing_date = result.closing_posting.transaction.date.strftime('%Y-%m-%d') if result.closing_posting.transaction else 'N/A'
-                    closing_account = result.closing_posting.account.name if result.closing_posting.account else 'N/A'
-                    closing_commodity = result.matched_quantity.commodity.name if result.matched_quantity.commodity else 'N/A'
-                    matched_quantity = result.matched_quantity.quantity
-                    acquisition_date = result.opening_lot_original_posting.transaction.date.strftime('%Y-%m-%d') if result.opening_lot_original_posting.transaction else 'N/A'
-                    cost_basis = result.cost_basis.quantity
-                    proceeds = result.proceeds.quantity
-                    gain_loss = result.gain_loss.quantity
-                    gain_loss_commodity = result.gain_loss.commodity.name if result.gain_loss.commodity else 'N/A'
+            if balance_sheet.capital_gains_realized:
+                for gain_result in balance_sheet.capital_gains_realized: # Rename loop variable to avoid shadowing
+                    # Use the date fields directly from CapitalGainResult
+                    closing_date_str = gain_result.closing_date.strftime('%Y-%m-%d') if gain_result.closing_date else 'N/A'
+                    acquisition_date_str = gain_result.acquisition_date.strftime('%Y-%m-%d') if gain_result.acquisition_date else 'N/A'
 
+                    closing_account = gain_result.closing_posting.account.name if gain_result.closing_posting.account else 'N/A'
+                    closing_commodity = gain_result.matched_quantity.commodity.name if gain_result.matched_quantity.commodity else 'N/A'
+                    matched_quantity = gain_result.matched_quantity.quantity
+                    cost_basis = gain_result.cost_basis.quantity
+                    proceeds = gain_result.proceeds.quantity
+                    gain_loss = gain_result.gain_loss.quantity
+                    gain_loss_commodity = gain_result.gain_loss.commodity.name if gain_result.gain_loss.commodity else 'N/A'
 
-                    click.echo(f"  Sale Date: {closing_date}, Account: {closing_account}, Commodity: {closing_commodity}, Quantity: {matched_quantity}")
-                    click.echo(f"    Acquisition Date: {acquisition_date}, Cost Basis: {cost_basis}, Proceeds: {proceeds}, Gain/Loss: {gain_loss} {gain_loss_commodity}")
+                    click.echo(f"  Sale Date: {closing_date_str}, Account: {closing_account}, Commodity: {closing_commodity}, Quantity: {matched_quantity}")
+                    click.echo(f"    Acquisition Date: {acquisition_date_str}, Cost Basis: {cost_basis}, Proceeds: {proceeds}, Gain/Loss: {gain_loss} {gain_loss_commodity}")
             else:
                 click.echo("  No capital gains or losses calculated.")
 

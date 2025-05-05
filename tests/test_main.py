@@ -202,14 +202,17 @@ assets:broker:AAPL:20230120
 assets:broker:GOOG:20230125
   10 GOOG
 assets:cash
-  1080 USD"""
+  1080 USD
 
-    result = subprocess.run(
+Capital Gains Results:
+  No capital gains or losses calculated."""
+
+    result = subprocess.run( # Correct indentation
         ["python", "-m", "src.main", "balance", str(balance_journal_path)],
         capture_output=True,
         text=True,
         check=True,  # Raise an exception if the command fails
     )
-    output = result.stdout.strip()
+    output = result.stdout.strip() # Correct indentation
 
-    assert output == expected_output.strip()
+    assert output == expected_output.strip() # Correct indentation

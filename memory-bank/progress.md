@@ -22,6 +22,14 @@ This document tracks the progress, completed features, and remaining tasks for l
 - **Resolved import and attribute errors encountered during the implementation and testing of the caching mechanism.**
 - Added `isCrypto()` method to `Commodity` class in `src/classes.py` and added tests for it in `tests/test_classes.py`.
 - Fixed `AttributeError: 'Account' object has no attribute 'isAsset'` in `src/main.py`.
+- **Completed Phase 1: Integrated Capital Gains Calculation into Balance Sheet Builder:**
+    - Integrated FIFO matching and gain/loss calculation logic into `src/balance.py::calculate_balances_and_lots`.
+    - `calculate_balances_and_lots` now incrementally applies gains/losses to income/expense account balances.
+    - `CapitalGainResult` dataclass moved to `src/classes.py` and updated to include date fields.
+    - `calculate_balances_and_lots` now stores detailed `CapitalGainResult` objects in the `BalanceSheet.capital_gains_realized` list.
+    - CLI command `balance` in `src/main.py` updated to display capital gains from the `BalanceSheet`.
+    - Tests moved and adapted to `tests/test_balance.py` to verify integrated logic.
+    - All tests pass after fixing issues related to the integration (`AttributeError`, `AssertionError`, `IndentationError`, Mypy errors).
 
 ## What's Left to Build
 
@@ -34,8 +42,9 @@ This document tracks the progress, completed features, and remaining tasks for l
 
 ## Current Status
 
-- The project's main goal remains implementing the capital gains tracking tool.
+- **Phase 1 (Integration of Capital Gains Calculation into Balance Sheet Builder) is complete.**
 - The performance optimization for source position lookups during parsing has been completed and verified by passing tests.
+- Ready to begin Phase 2 (Generating journal entries, updating files).
 
 ## Known Issues
 
@@ -49,5 +58,6 @@ This document tracks the progress, completed features, and remaining tasks for l
 - **Adopted pytest as the testing framework and refactored existing tests.**
 - **Implemented an in-memory caching mechanism for source position lookups to improve parsing performance.**
 - **Decided to remove the non-functional `closing_postings` mechanism.**
-- **Planned the reimplementation strategy for FIFO matching based on iterating transactions and using `BalanceSheet` lots.**
+- **Planned the reimplementation strategy for FIFO matching based on iterating transactions and using `BalanceSheet` lots.** (Implemented in Phase 1)
 - **Decided that each test file must contain at most 500 lines of code to improve maintainability.**
+- **Decided to store detailed `CapitalGainResult` objects within the `BalanceSheet` for potential future use (e.g., journal updates).**

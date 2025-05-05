@@ -267,6 +267,18 @@ class Amount(PositionAware["Amount"]):
 
 
 @dataclass
+class CapitalGainResult:
+    """Represents the result of a capital gain/loss calculation for a matched sale portion."""
+    closing_posting: "Posting"
+    opening_lot_original_posting: "Posting" # Reference to the original posting of the matched lot
+    matched_quantity: "Amount"
+    cost_basis: "Amount" # Total cost basis for the matched quantity
+    proceeds: "Amount" # Total proceeds for the matched quantity
+    gain_loss: "Amount" # Calculated gain or loss
+    closing_date: date # Add closing date
+    acquisition_date: date # Add acquisition date
+
+@dataclass
 class AmountStyle(PositionAware["AmountStyle"]):
     """Style of an amount"""
 
