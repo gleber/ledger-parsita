@@ -6,8 +6,7 @@ import click
 import pprint
 from pathlib import Path
 from src.filtering import filter_entries
-from src.hledger_parser import parse_hledger_journal
-from src.classes import Journal, JournalEntry
+from src.classes import Journal, JournalEntry # Updated import
 import re
 from parsita import ParseError
 from src.classes import Posting, Transaction, sl
@@ -66,7 +65,7 @@ def pprint_cmd(filename: Path, flat: bool, strip: bool, query: Optional[str]):
     """Parses the journal file and pretty-prints the result."""
     result: Result[Journal, ValueError] = flow(
         str(filename.absolute()),
-        parse_hledger_journal,
+        Journal.parse_from_file, # Updated call
         bind(lambda journal: parse_filter_strip(journal, flat, strip, query))
     )
 
@@ -95,7 +94,7 @@ def pprint_cmd(filename: Path, flat: bool, strip: bool, query: Optional[str]):
 )
 def print_cmd(filename: Path, flat: bool, strip: bool, query: Optional[str]):
     """Parses the journal file and prints the result using to_journal_string."""
-    parse_result = parse_hledger_journal(str(filename.absolute()))
+    parse_result = Journal.parse_from_file(str(filename.absolute())) # Updated call
 
     match parse_result:
         case Success(journal):
@@ -177,7 +176,7 @@ def find_positions_cmd(filename: Path):
     """Finds transactions that open or close positions."""
     result: Result[Journal, ValueError] = flow(
         str(filename.absolute()),
-        parse_hledger_journal,
+        Journal.parse_from_file, # Updated call
         bind(lambda journal: parse_filter_strip(journal, True, False, None))
     )
 
@@ -222,7 +221,7 @@ def balance_cmd(filename: Path):
     """Calculates and prints the current balance of all accounts."""
     result: Result[Journal, ValueError] = flow(
         str(filename.absolute()),
-        parse_hledger_journal,
+        Journal.parse_from_file,
         bind(lambda journal: parse_filter_strip(journal, True, False, None))
     )
 

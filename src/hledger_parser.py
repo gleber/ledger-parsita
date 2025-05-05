@@ -3,7 +3,7 @@ import pprint
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from parsita import lit, reg, rep, rep1, repsep, opt, ParserContext, ParseError
+from parsita import lit, reg, rep, rep1, repsep, opt, ParserContext
 
 from parsita.util import splat
 from datetime import (
@@ -300,61 +300,4 @@ class HledgerParsers(ParserContext, whitespace=None):
                 entries=[item for item in items if isinstance(item, JournalEntry)]
             )
         )
-    )
-
-
-def recursive_include(journal: Journal, journal_fn: Path) -> Result[Journal, str]:
-    parent_journal_dir = Path(journal_fn).parent
-
-    def include_one(entry: JournalEntry) -> JournalEntry:
-        if not entry.include:
-            return entry
-        include = entry.include
-        # Recursively parse included journal and handle the Result
-        included_journal_result = parse_hledger_journal(
-            Path(parent_journal_dir, include.filename)
-        )
-
-        # Use pattern matching to handle the Result
-        match included_journal_result:
-            case Success(included_journal):
-                include = replace(entry.include, journal=included_journal)
-                return replace(entry, include=include)
-            case Failure(error):
-                # Handle the error, perhaps by logging or returning a JournalEntry indicating the error
-                # For now, we'll return the original entry, but this should be improved
-                print(f"Error including file {include.filename}: {error}")
-                return entry
-        raise Exception("Inexhaustive match!")
-
-    entries = [include_one(i) for i in journal.entries]
-    return Success(replace(journal, entries=entries))
-
-
-def parse_hledger_journal_content(
-    file_content: str, filename: Path
-) -> Result[Journal, ParseError]:
-    # Use map to handle the parsing result instead of unwrap
-    return HledgerParsers.journal.parse(file_content).map(lambda j: j.set_filename(filename, file_content))
-
-
-@safe
-def read_file_content(filename: Path) -> str:
-    return filename.read_text()
-
-
-def parse_hledger_journal(filename: str | Path) -> Result[Journal, Exception]:
-    if not isinstance(filename, Path):
-        filename = Path(filename)
-
-    # Use flow and bind to chain the file reading and parsing operations
-    return flow(
-        filename,
-        read_file_content,
-        bind(
-            lambda file_content: parse_hledger_journal_content(
-                file_content, filename
-            )
-        ),
-        bind(lambda journal: recursive_include(journal, filename)), # recursive_include still expects a string
     )

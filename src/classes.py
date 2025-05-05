@@ -10,6 +10,12 @@ from datetime import date, datetime
 from decimal import Decimal
 import re
 import bisect
+from returns.result import Result, Success, Failure, safe # Import Result, Success, Failure, safe
+from returns.pipeline import flow
+from returns.pointfree import bind
+from parsita import ParseError, ParserContext, Parser, Reader, lit, reg, rep, rep1, repsep, opt # Import necessary parsita components
+from parsita.state import Continue, Input, Output, State # Import from parsita.state
+from parsita.util import splat # Import splat
 
 CASH_TICKERS = ["USD", "PLN", "EUR"]
 CRYPTO_TICKERS = ["BTC", "ETH", "XRP", "LTC", "BCH", "ADA", "DOT", "UNI", "LINK", "SOL", "PseudoUSD", "BUSD", "FDUSD", "USDT", "USDC", "FTM", "ALGO"]
@@ -744,3 +750,59 @@ class Journal(PositionAware["Journal"]):
 
         # Create a new Journal instance with the flattened entries
         return Journal(entries=flattened_entries, source_location=self.source_location)
+
+    @staticmethod
+    def parse_from_file(filename: str) -> Result["Journal", Union[ParseError, str]]:
+        """Parses an hledger journal file and returns a Journal object."""
+        if not isinstance(filename, Path):
+            filename = Path(filename)
+
+        # Use flow and bind to chain the file reading and parsing operations
+        return flow(
+            filename,
+            Journal.read_file_content, # Use the static method
+            bind(
+                lambda file_content: Journal.parse_from_content( # Use the static method
+                    file_content, filename
+                )
+            ),
+            bind(lambda journal: journal.recursive_include(filename)), # Use the instance method
+        )
+
+    @staticmethod
+    @safe
+    def read_file_content(filename: Path) -> str:
+        return filename.read_text()
+
+    @staticmethod
+    def parse_from_content(content: str, filename: Path) -> Result["Journal", Union[ParseError, str]]:
+        """Parses hledger journal content string and returns a Journal object."""
+        from src.hledger_parser import HledgerParsers  # Import here to avoid circular dependency
+        return HledgerParsers.journal.parse(content).map(lambda j: j.set_filename(filename, content))
+
+    def recursive_include(self, journal_fn: Path) -> Result["Journal", str]:
+        parent_journal_dir = Path(journal_fn).parent
+
+        def include_one(entry: JournalEntry) -> JournalEntry:
+            if not entry.include:
+                return entry
+            include = entry.include
+            # Recursively parse included journal and handle the Result
+            included_journal_result = Journal.parse_from_file( # Use the static method
+                Path(parent_journal_dir, include.filename)
+            )
+
+            # Use pattern matching to handle the Result
+            match included_journal_result:
+                case Success(included_journal):
+                    include = replace(entry.include, journal=included_journal)
+                    return replace(entry, include=include)
+                case Failure(error):
+                    # Handle the error, perhaps by logging or returning a JournalEntry indicating the error
+                    # For now, we'll return the original entry, but this should be improved
+                    print(f"Error including file {include.filename}: {error}")
+                    return entry
+            raise Exception("Inexhaustive match!")
+
+        entries = [include_one(i) for i in self.entries] # Use self.entries
+        return Success(replace(self, entries=entries)) # Use self

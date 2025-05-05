@@ -1,6 +1,5 @@
 from pathlib import Path
-from src.hledger_parser import parse_hledger_journal
-from src.classes import Journal, JournalEntry, Transaction, Include, AccountName, Amount, Commodity, SourceLocation
+from src.classes import Journal, JournalEntry, Transaction, Include, AccountName, Amount, Commodity, SourceLocation # Updated import
 from datetime import date
 from decimal import Decimal
 import pytest
@@ -10,7 +9,7 @@ TEST_INCLUDES_DIR = Path("tests/includes")
 
 def test_simple_flattening():
     main_journal_path = TEST_INCLUDES_DIR / "main.journal"
-    parsed_journal = parse_hledger_journal(str(main_journal_path)).unwrap()
+    parsed_journal = Journal.parse_from_file(str(main_journal_path)).unwrap() # Updated call
     flattened_journal = parsed_journal.flatten()
 
     # Expected number of entries after flattening: 2 from main + 1 from journal_a + 2 from journal_b (1 from b + 1 from c)
@@ -76,7 +75,7 @@ def test_simple_flattening():
 
 def test_nested_flattening():
     journal_b_path = TEST_INCLUDES_DIR / "journal_b.journal"
-    parsed_journal_b = parse_hledger_journal(str(journal_b_path)).unwrap()
+    parsed_journal_b = Journal.parse_from_file(str(journal_b_path)).unwrap() # Updated call
     flattened_journal_b = parsed_journal_b.flatten()
 
     # Expected number of entries after flattening: 1 from journal_b + 1 from journal_c
@@ -94,7 +93,7 @@ def test_nested_flattening():
 
 def test_original_journal_unchanged():
     main_journal_path = TEST_INCLUDES_DIR / "main.journal"
-    parsed_journal = parse_hledger_journal(str(main_journal_path)).unwrap()
+    parsed_journal = Journal.parse_from_file(str(main_journal_path)).unwrap() # Updated call
     original_entries_count = len(parsed_journal.entries)
 
     flattened_journal = parsed_journal.flatten()

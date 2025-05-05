@@ -86,6 +86,7 @@ This document outlines the current focus and active considerations for ledger-pa
 - Design of the filtering API.
 - Implementation details of the in-memory caching for source position lookups.
 - **Successfully refactored `build_balance_sheet_from_transactions` into the static method `BalanceSheet.from_transactions`.**
+- **Successfully refactored `parse_hledger_journal` and `parse_hledger_journal_content` into static methods `Journal.parse_from_file` and `Journal.parse_from_content` within `src/classes.py`, resolving circular import issues.**
 
 ## Important Patterns and Preferences
 

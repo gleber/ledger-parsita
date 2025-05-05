@@ -19,7 +19,6 @@ from src.classes import (
 )
 
 from src.balance import BalanceSheet, Lot, Account, Balance, CashBalance, AssetBalance # Updated import
-from src.hledger_parser import parse_hledger_journal_content
 
 # Moved and adapted tests from test_capital_gains_fifo.py
 
@@ -35,7 +34,7 @@ def test_calculate_balances_and_lots_simple_capital_gain():
     assets:cash                 1000 USD
     income:capital-gains        -100 USD ; This posting is ignored by the calculation logic now
 """
-    journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
+    journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
@@ -73,7 +72,7 @@ def test_calculate_balances_and_lots_multiple_opens_single_close():
     assets:cash                 2000 USD
     income:capital-gains        -200 USD ; Ignored
 """
-    journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
+    journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
@@ -119,7 +118,7 @@ def test_calculate_balances_and_lots_single_open_multiple_closes():
     assets:cash                 1500 USD
     income:capital-gains        -150 USD ; Ignored
 """
-    journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
+    journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
@@ -166,7 +165,7 @@ def test_calculate_balances_and_lots_multiple_assets():
     assets:cash                 1500 USD
     income:capital-gains        -150 USD ; Ignored
 """
-    journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
+    journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
@@ -206,7 +205,7 @@ def test_calculate_balances_and_lots_excludes_non_asset_closing_postings():
     assets:cash:USD          -100 USD
     expenses:withdrawal       100 USD
 """
-    journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
+    journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
@@ -237,7 +236,7 @@ def test_calculate_balances_and_lots_handles_undated_open_accounts():
     assets:cash                 20000 USD
     income:capital-gains        -5000 USD ; Ignored
 """
-    journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
+    journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
@@ -270,7 +269,7 @@ def test_calculate_balances_and_lots_partial_match_gain():
     assets:cash                 600 USD
     income:capital-gains        -200 USD ; Ignored
 """
-    journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
+    journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
@@ -304,7 +303,7 @@ def test_calculate_balances_and_lots_multiple_postings_same_commodity():
     income:dividends:XYZ        50 USD
     income:capital-gains       -350 USD ; Ignored
 """
-    journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
+    journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
@@ -345,7 +344,7 @@ def test_calculate_balances_and_lots_multiple_cash_postings():
     assets:cash:broker2         450 USD
     income:capital-gains       -350 USD ; Ignored
 """
-    journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
+    journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
@@ -379,7 +378,7 @@ def test_calculate_balances_and_lots_insufficient_lots():
     assets:cash                 1500 USD
     income:capital-gains       -1000 USD ; Ignored
 """
-    journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
+    journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
@@ -432,7 +431,7 @@ def test_calculate_balances_and_lots_complex_fifo():
     assets:cash                 1500 USD
     income:capital-gains        -200 USD ; Ignored
 """
-    journal = parse_hledger_journal_content(journal_string, Path("a.journal")).unwrap()
+    journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 

@@ -5,13 +5,13 @@ from decimal import Decimal
 
 from parsita import Success, Failure, ParseError
 
-from src.hledger_parser import HledgerParsers, parse_hledger_journal
+from src.hledger_parser import HledgerParsers # Keep HledgerParsers for direct parser tests
 from src.classes import (
     SourceLocation,
     CommodityDirective,
     CostKind,
     Include,
-    Journal,
+    Journal, # Import Journal
     JournalEntry,
     Status,
     AccountName,
@@ -379,7 +379,7 @@ include foo.bar
     not Path("examples/taxes/all.journal").exists(), reason="personal data"
 )
 def test_recursive_journal():
-    result = parse_hledger_journal("examples/taxes/all.journal").unwrap().strip_loc()
+    result = Journal.parse_from_file("examples/taxes/all.journal").unwrap().strip_loc() # Updated call
     assert len(result.entries) == 13
     assert result.entries[0].include is not None
     assert result.entries[0].include.filename == "directives.journal"
@@ -387,7 +387,7 @@ def test_recursive_journal():
 
 def test_simple_flattening():
     main_journal_path = TEST_INCLUDES_DIR / "main.journal"
-    parsed_journal = parse_hledger_journal(str(main_journal_path)).unwrap()
+    parsed_journal = Journal.parse_from_file(str(main_journal_path)).unwrap() # Updated call
     assert len(parsed_journal.entries) == 4
     assert parsed_journal.entries[0].source_location == SourceLocation(
         filename=main_journal_path.absolute(),

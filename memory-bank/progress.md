@@ -35,6 +35,7 @@ This document tracks the progress, completed features, and remaining tasks for l
     - Updated all relevant tests and `src/main.py` to use the new function.
     - All tests pass after refactoring.
 - Refactored `build_balance_sheet_from_transactions` into the static method `BalanceSheet.from_transactions`.
+- Refactored `parse_hledger_journal` and `parse_hledger_journal_content` into static methods `Journal.parse_from_file` and `Journal.parse_from_content` within `src/classes.py`, resolving circular import issues.
 
 ## What's Left to Build
 
