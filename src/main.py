@@ -8,11 +8,11 @@ from pathlib import Path
 from src.classes import Journal, JournalEntry # Updated import
 import re
 from parsita import ParseError
-from src.classes import Posting, Transaction, sl
+from src.classes import Posting, Transaction, sl, AccountName # Import AccountName
 from src.filtering import BaseFilter, parse_query
 from returns.result import Result, Success, Failure
 from src.capital_gains import find_open_transactions, find_close_transactions
-from src.balance import BalanceSheet # Updated import
+from src.balance import BalanceSheet, Account # Import BalanceSheet and Account
 from returns.pipeline import (flow)
 from returns.pointfree import (bind)
 from src.filtering import Filters, FILTER_LIST # Import Filters and FILTER_LIST
@@ -188,7 +188,14 @@ def find_positions_cmd(filename: Path):
 @click.option(
     "-q", "--query", type=FILTER_LIST, default=None, help="Filter transactions using a query string."
 )
-def balance_cmd(filename: Path, query: Optional[Filters]):
+@click.option(
+    "-F", "--flat", is_flag=True, help="Print accounts as a flat list instead of a tree."
+)
+@click.option(
+    "-D", "--display", type=click.Choice(['own', 'total', 'both'], case_sensitive=False),
+    default='total', help="Specify which balances to display: 'own', 'total', or 'both'."
+)
+def balance_cmd(filename: Path, query: Optional[Filters], flat: bool, display: str):
     """Calculates and prints the current balance of all accounts."""
     result: Result[Journal, Union[ParseError, str, ValueError]] = Journal.parse_from_file(
         str(filename.absolute()), flat=True, strip=False, query=query
@@ -203,23 +210,19 @@ def balance_cmd(filename: Path, query: Optional[Filters]):
             transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
             balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
-            # Format and print the balance sheet
             click.echo("Current Balances:")
-            # Sort accounts alphabetically
-            for account_name in sorted(balance_sheet.accounts.keys(), key=lambda x: str(x)):
-                account = balance_sheet.get_account(account_name)
-                if not account.name.isAsset():
-                    continue
-                click.echo(f"{account.name}")
-                # Sort commodities alphabetically within each account
-                for commodity, balance in sorted(account.balances.items(), key=lambda x: str(x[0])):
-                    click.echo(f"  {balance.total_amount}")
+            if flat:
+                for line in balance_sheet.format_account_flat(display=display): # Use BalanceSheet method
+                    click.echo(line)
+            else:
+                # The BalanceSheet.format_account_hierarchy method now handles iterating through its root accounts.
+                for line in balance_sheet.format_account_hierarchy(display=display): 
+                    click.echo(line)
 
             # Print Capital Gains Results from the BalanceSheet object
             click.echo("\nCapital Gains Results:")
             if balance_sheet.capital_gains_realized:
-                for gain_result in balance_sheet.capital_gains_realized: # Rename loop variable to avoid shadowing
-                    # Use the date fields directly from CapitalGainResult
+                for gain_result in balance_sheet.capital_gains_realized:
                     closing_date_str = gain_result.closing_date.strftime('%Y-%m-%d') if gain_result.closing_date else 'N/A'
                     acquisition_date_str = gain_result.acquisition_date.strftime('%Y-%m-%d') if gain_result.acquisition_date else 'N/A'
 
@@ -238,6 +241,8 @@ def balance_cmd(filename: Path, query: Optional[Filters]):
 
     exit(0)
 
+# Removed _format_account_hierarchy and _format_account_flat as they are now methods of BalanceSheet
+# Removed "from typing import Generator" as it's no longer needed here
 
 if __name__ == "__main__":
     cli()

@@ -132,6 +132,9 @@ def test_cli_print_command_flat():
         check=True,
     )
     output = result.stdout.strip()
+    print("--- Actual Output ---")
+    print(output)
+    print("---------------------")
 
     assert output == expected_output.strip()
 
@@ -192,27 +195,57 @@ def test_cli_find_positions_command():
     assert len(output_lines_stripped) == len(expected_output_lines_stripped)
     assert output_lines_stripped == expected_output_lines_stripped
 
-def test_cli_balance_command():
-    balance_journal_path = TEST_INCLUDES_DIR / "test_balance.journal"
-    expected_output = """Current Balances:
-assets:bank
-  -1850 USD
-assets:broker:AAPL:20230120
+    def test_cli_balance_command():
+        balance_journal_path = TEST_INCLUDES_DIR / "test_balance.journal"
+        expected_output = """Current Balances:
+assets
   5 AAPL
-assets:broker:GOOG:20230125
   10 GOOG
-assets:cash
-  1080 USD
+  -770 USD
+  assets:bank
+    -1850 USD
+  assets:broker
+    5 AAPL
+    10 GOOG
+    assets:broker:AAPL
+      5 AAPL
+      assets:broker:AAPL:20230120
+        5 AAPL
+    assets:broker:GOOG
+      10 GOOG
+      assets:broker:GOOG:20230125
+        10 GOOG
+  assets:cash
+    1080 USD
+equity
+  -1000 USD
+  equity:opening-balances
+    -1000 USD
+expenses
+  50 EUR
+  20 USD
+  expenses:food
+    20 USD
+  expenses:travel
+    50 EUR
+income
+  -500 USD
+  income:salary
+    -500 USD
+liabilities
+  -50 EUR
+  liabilities:credit-card
+    -50 EUR
 
 Capital Gains Results:
   No capital gains or losses calculated."""
 
-    result = subprocess.run( # Correct indentation
+        result = subprocess.run(
         ["python", "-m", "src.main", "balance", str(balance_journal_path)],
         capture_output=True,
         text=True,
         check=True,  # Raise an exception if the command fails
     )
-    output = result.stdout.strip() # Correct indentation
+    output = result.stdout.strip()
 
-    assert output == expected_output.strip() # Correct indentation
+    assert output == expected_output.strip()
