@@ -5,6 +5,7 @@ This document outlines the current focus and active considerations for ledger-pa
 ## Current Work Focus
 
 - **Completed Phase 1: Integrated Capital Gains Calculation into Balance Sheet Builder.**
+- **Completed adding date filters (`before:`, `after:`, `period:`) with partial date support.**
 - Starting Phase 2: Improvements.
 - Preparing for Phase 3: Future Steps.
 
@@ -73,6 +74,10 @@ This document outlines the current focus and active considerations for ledger-pa
 - Removed the `_apply_filters` function from `src/filtering.py`.
 - Modified `Journal.parse_from_file` in `src/classes.py` to accept an optional `Filters` object and use its `apply_to_entries()` method for filtering.
 - Fixed an indentation error in `src/classes.py`.
+- Implemented `BeforeDateFilter`, `AfterDateFilter`, and `PeriodFilter` classes in `src/filtering.py`.
+- Updated `FilterQueryParsers` in `src/filtering.py` to parse `before:`, `after:`, and `period:` filters with `YYYY-MM-DD`, `YYYY-MM`, and `YYYY` date formats.
+- Added new test cases for the date filters in `tests/test_filtering.py`.
+- Fixed a typo in `tests/test_filtering.py` (`transaction_date` to `date`).
 
 ## Next Steps
 

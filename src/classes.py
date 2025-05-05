@@ -789,8 +789,8 @@ class Journal(PositionAware["Journal"]):
                 )
             ),
             bind(lambda journal: journal.recursive_include(filename)), # Use the instance method
-            bind(_apply_filters_to_journal), # Apply filtering
             bind(_apply_flatten), # Apply flattening
+            bind(_apply_filters_to_journal), # Apply filtering
             bind(_apply_strip), # Apply stripping
         )
 

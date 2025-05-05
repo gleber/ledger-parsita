@@ -207,6 +207,74 @@ def test_combined_filters(sample_entries):
     assert filtered[0].transaction.payee == "Coffee Shop"
 
 
+def test_filter_by_before_date(sample_entries):
+    # before:YYYY-MM-DD
+    filtered = filter_entries(sample_entries, "before:2023-01-20").unwrap()
+    assert len(filtered) == 1
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Grocery Store"
+
+    # before:YYYY-MM
+    filtered = filter_entries(sample_entries, "before:2023-02").unwrap()
+    assert len(filtered) == 2
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Grocery Store"
+    assert filtered[1].transaction
+    assert filtered[1].transaction.payee == "Salary"
+
+    # before:YYYY
+    filtered = filter_entries(sample_entries, "before:2024").unwrap()
+    assert len(filtered) == 4 # All entries are before 2024
+
+    filtered = filter_entries(sample_entries, "before:2023-01-15").unwrap()
+    assert len(filtered) == 0 # No entries before 2023-01-15
+
+def test_filter_by_after_date(sample_entries):
+    # after:YYYY-MM-DD
+    filtered = filter_entries(sample_entries, "after:2023-01-20").unwrap()
+    assert len(filtered) == 2
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Coffee Shop"
+    assert filtered[1].transaction
+    assert filtered[1].transaction.date == date(2023, 2, 15)
+
+    # after:YYYY-MM
+    filtered = filter_entries(sample_entries, "after:2023-01").unwrap()
+    assert len(filtered) == 2
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Coffee Shop"
+    assert filtered[1].transaction
+    assert filtered[1].transaction.payee == "Bookstore"
+
+    # after:YYYY
+    filtered = filter_entries(sample_entries, "after:2022").unwrap()
+    assert len(filtered) == 4 # All entries are after 2022
+
+    filtered = filter_entries(sample_entries, "after:2023-02-15").unwrap()
+    assert len(filtered) == 0 # No entries after 2023-02-15
+
+def test_filter_by_period(sample_entries):
+    # period:YYYY-MM-DD
+    filtered = filter_entries(sample_entries, "period:2023-01-15").unwrap()
+    assert len(filtered) == 1
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Grocery Store"
+
+    # period:YYYY-MM
+    filtered = filter_entries(sample_entries, "period:2023-01").unwrap()
+    assert len(filtered) == 2
+    assert filtered[0].transaction
+    assert filtered[0].transaction.payee == "Grocery Store"
+    assert filtered[1].transaction
+    assert filtered[1].transaction.payee == "Salary"
+
+    # period:YYYY
+    filtered = filter_entries(sample_entries, "period:2023").unwrap()
+    assert len(filtered) == 4 # All entries are in 2023
+
+    filtered = filter_entries(sample_entries, "period:2024").unwrap()
+    assert len(filtered) == 0 # No entries in 2024
+
 def test_invalid_query(sample_entries):
     result = filter_entries(sample_entries, "invalid:filter")
     assert isinstance(result, Failure)

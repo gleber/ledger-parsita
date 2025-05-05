@@ -39,6 +39,7 @@ This document tracks the progress, completed features, and remaining tasks for l
 - Removed `parse_filter_strip` function from `src/main.py`.
 - Updated `Journal.parse_from_file` in `src/classes.py` to include filtering, flattening, and stripping logic via keyword-only arguments.
 - Updated CLI commands in `src/main.py` to use the new `Journal.parse_from_file` signature.
+- Implemented date filters (`before:`, `after:`, `period:`) with partial date support.
 
 ## What's Left to Build
 
@@ -56,6 +57,7 @@ This document tracks the progress, completed features, and remaining tasks for l
 
 - **Phase 1 (Integration of Capital Gains Calculation into Balance Sheet Builder) is complete.**
 - **Filtering API design and implementation is complete.**
+- **Implemented date filters (`before:`, `after:`, `period:`) with partial date support.**
 - **Refactoring of balance calculation logic is complete.**
 - The performance optimization for source position lookups during parsing has been completed and verified by passing tests.
 - Ready to begin Phase 2 (Generating journal entries, updating files).

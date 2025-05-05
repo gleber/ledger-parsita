@@ -185,10 +185,13 @@ def find_positions_cmd(filename: Path):
 @click.argument(
     "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
 )
-def balance_cmd(filename: Path):
+@click.option(
+    "-q", "--query", type=FILTER_LIST, default=None, help="Filter transactions using a query string."
+)
+def balance_cmd(filename: Path, query: Optional[Filters]):
     """Calculates and prints the current balance of all accounts."""
     result: Result[Journal, Union[ParseError, str, ValueError]] = Journal.parse_from_file(
-        str(filename.absolute()), flat=True, strip=False, query=None
+        str(filename.absolute()), flat=True, strip=False, query=query
     )
 
     match result:

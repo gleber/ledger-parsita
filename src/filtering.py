@@ -6,13 +6,14 @@ from typing import List, Optional, Union
 from parsita import lit, rep, reg, repsep, ParserContext, opt, ParseError
 
 from src.classes import JournalEntry, Transaction, Posting, Amount, AccountName
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 import re
 from dataclasses import dataclass, field
 from returns.result import Result, safe, Success, Failure
 from returns.curry import partial
 from abc import ABC, abstractmethod
+import calendar
 
 @dataclass
 class BaseFilter(ABC):
@@ -37,6 +38,31 @@ class AccountFilter(BaseFilter):
                 return True
         return False
 
+
+@dataclass
+class BeforeDateFilter(BaseFilter):
+    filter_date: date
+
+    def is_matching(self, transaction: Transaction) -> bool:
+        """Checks if the transaction date is before the specified date."""
+        return transaction.date < self.filter_date
+
+@dataclass
+class AfterDateFilter(BaseFilter):
+    filter_date: date
+
+    def is_matching(self, transaction: Transaction) -> bool:
+        """Checks if the transaction date is after the specified date."""
+        return transaction.date > self.filter_date
+
+@dataclass
+class PeriodFilter(BaseFilter):
+    start_date: date
+    end_date: date
+
+    def is_matching(self, transaction: Transaction) -> bool:
+        """Checks if the transaction date falls within the specified period."""
+        return self.start_date <= transaction.date <= self.end_date
 
 @dataclass
 class DateFilter(BaseFilter):
@@ -112,16 +138,32 @@ class FilterQueryParsers(ParserContext, whitespace=r"\s*"):
     # Basic parsers
     colon = lit(":")
     number = reg(r"-?\d+(\.\d+)?") > (lambda x: Decimal(x))
-    date_str = reg(r"\d{4}-\d{2}-\d{2}") > (lambda parts: datetime.strptime(parts, '%Y-%m-%d').date())
+
+    # Flexible date parser (YYYY-MM-DD, YYYY-MM, YYYY)
+    year_parser = reg(r"\d{4}") > (lambda y: int(y))
+    month_parser = reg(r"\d{2}") > (lambda m: int(m))
+    day_parser = reg(r"\d{2}") > (lambda d: int(d))
+
+    full_date_parser = year_parser & lit("-") & month_parser & lit("-") & day_parser > (
+        lambda parts: date(parts[0], parts[2], parts[4])
+    )
+    month_date_parser = year_parser & lit("-") & month_parser > (
+        lambda parts: (date(parts[0], parts[2], 1), date(parts[0], parts[2], calendar.monthrange(parts[0], parts[2])[1]))
+    )
+    year_date_parser = year_parser > (
+        lambda year: (date(year, 1, 1), date(year, 12, 31))
+    )
+
+    flexible_date_parser = full_date_parser | month_date_parser | year_date_parser
 
     # Filter value parsers
     account_part = reg(r"[A-Za-z_]+")
     account = repsep(account_part, lit(":"), min=1)
 
-    date_range = opt(date_str) & lit("..") & opt(date_str) > (
+    date_range = opt(full_date_parser) & lit("..") & opt(full_date_parser) > (
         lambda parts: (parts[0][0] if parts[0] else None, parts[2][0] if parts[2] else None)
     )
-    single_date = date_str > (lambda d: (d,d))
+    single_date = full_date_parser > (lambda d: (d,d))
 
     description_text = reg(r"[^\s]+")
     amount_operator = reg(r"(>=|<=|!=|==|>|<)")
@@ -151,9 +193,30 @@ class FilterQueryParsers(ParserContext, whitespace=r"\s*"):
         )
     )
 
+    before_date_filter = lit("before") >> colon >> flexible_date_parser > (
+        lambda parsed_date: BeforeDateFilter(
+            filter_date=parsed_date if isinstance(parsed_date, date) else parsed_date[0]
+        )
+    )
+
+    after_date_filter = lit("after") >> colon >> flexible_date_parser > (
+        lambda parsed_date: AfterDateFilter(
+            filter_date=parsed_date if isinstance(parsed_date, date) else parsed_date[1]
+        )
+    )
+
+    period_filter = lit("period") >> colon >> flexible_date_parser > (
+        lambda parsed_date: PeriodFilter(
+            start_date=parsed_date if isinstance(parsed_date, date) else parsed_date[0],
+            end_date=parsed_date if isinstance(parsed_date, date) else parsed_date[1]
+        )
+    )
+
+
     # Combined filter parser
     filter_condition = (
-        account_filter | date_filter | description_filter | amount_filter | tag_filter
+        account_filter | date_filter | description_filter | amount_filter | tag_filter |
+        before_date_filter | after_date_filter | period_filter
     )
 
     # Main query parser (list of filter conditions separated by spaces)

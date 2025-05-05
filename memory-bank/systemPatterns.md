@@ -32,8 +32,9 @@ This document describes the system architecture and key design patterns used in 
         - **Applying the calculated gain/loss directly to the running balances of the appropriate income/expense accounts.**
         - **Storing detailed gain/loss results (`CapitalGainResult` objects) in the `capital_gains_realized` list within the `BalanceSheet`.**
 - **Filter Pattern:** A mechanism for applying various criteria to filter transactions and postings. This includes:
-    - Defining filter conditions, the `Filters` class, and the `FilterListParamType` in `src/filtering.py`.
+    - Defining filter conditions (`BaseFilter` and its subclasses like `AccountFilter`, `DateFilter`, `DescriptionFilter`, `AmountFilter`, `TagFilter`, `BeforeDateFilter`, `AfterDateFilter`, `PeriodFilter`), the `Filters` class, and the `FilterListParamType` in `src/filtering.py`.
     - Using the `FilterListParamType` in `src/main.py` to parse filter strings from the command line into a `Filters` object.
+    - Parsing filter queries using `FilterQueryParsers` in `src/filtering.py`, which now supports `before:`, `after:`, and `period:` filters with `YYYY-MM-DD`, `YYYY-MM`, and `YYYY` date formats.
     - Passing the parsed `Filters` object directly to `Journal.parse_from_file` in `src/classes.py`.
     - Using the `Filters.apply_to_entries()` method to filter journal entries.
 - **Journal Updater Pattern:** A component responsible for modifying the journal file in place (future implementation, potentially using stored `CapitalGainResult` data).
