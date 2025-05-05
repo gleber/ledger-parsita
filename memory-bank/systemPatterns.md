@@ -4,16 +4,16 @@ This document describes the system architecture and key design patterns used in 
 
 ## Architecture
 
-- The system follows a modular design, with separate modules for parsing, filtering, and capital gains tracking.
-- Input hledger journal files are processed to identify relevant transactions for capital gains calculation.
-- The tool will need to read the entire journal to establish the history of asset acquisitions and dispositions.
+- The system follows a modular design, with separate modules for parsing and filtering.
+- **Capital gains tracking is integrated directly into the balance sheet building process.**
+- Input hledger journal files are processed chronologically.
+- The balance sheet builder reads the entire journal to establish the history of asset acquisitions and dispositions, calculating gains/losses incrementally.
 
 ## Key Technical Decisions
 
 - Using Python for development due to its suitability for text processing and data manipulation.
 - Using the `parsita` library for parsing the hledger journal format.
 - Using the `returns` library for error handling.
-- **Removing the non-functional `closing_postings` mechanism.**
 - **Implementing a robust FIFO logic by iterating through transactions to find sales and matching them against lots stored in the `BalanceSheet`.**
 - **Designing a mechanism for safely updating the hledger journal file in place (future step).**
 - **Implemented an in-memory caching mechanism for source position lookups to improve parsing performance.**
@@ -22,32 +22,39 @@ This document describes the system architecture and key design patterns used in 
 ## Design Patterns
 
 - **Parser Pattern:** A dedicated component (`src/hledger_parser.py`) for parsing the hledger journal format into `Journal` objects.
-- **Balance Sheet Builder Pattern:** A component (`src/balance.py`) that processes a `Journal` to create a `BalanceSheet`, calculating balances and identifying asset lots with their cost basis.
+- **Balance Sheet Builder Pattern:** A component (`src/balance.py`, specifically `calculate_balances_and_lots`) that processes a `Journal` chronologically to create a `BalanceSheet`. It is responsible for:
+    - Calculating running balances for all accounts.
+    - Identifying asset lots (`Lot` objects) with their cost basis upon acquisition.
+    - **Incrementally calculating capital gains/losses upon encountering closing postings (sales):**
+        - Performing FIFO matching against available lots tracked within the builder's state.
+        - Calculating cost basis, proceeds, and gain/loss for matched portions.
+        - Updating the remaining quantity of matched lots.
+        - **Applying the calculated gain/loss directly to the running balances of the appropriate income/expense accounts.**
+        - Optionally storing detailed gain/loss results (`CapitalGainResult`).
 - **Filter Pattern:** A mechanism (`src/filtering.py`) for applying various criteria to filter transactions and postings.
-- **Capital Gains Calculator Pattern:** A component (`src/capital_gains.py`, specifically the planned `calculate_capital_gains` function) responsible for:
-    - Taking the full list of `Transaction` objects and the `BalanceSheet` as input.
-    - Iterating through transactions to identify closing postings (sales).
-    - Matching sales against available lots from the `BalanceSheet` using FIFO logic.
-    - Calculating gains/losses for each match.
-    - Returning structured results (e.g., `CapitalGainResult` objects).
-- **Journal Updater Pattern:** A component responsible for modifying the journal file in place (future implementation).
+- **Journal Updater Pattern:** A component responsible for modifying the journal file in place (future implementation, potentially using stored `CapitalGainResult` data).
 - **Caching Pattern:** Utilized (`src/classes.py:SourceCacheManager`) for optimizing source position lookups during parsing.
 
 ## Component Relationships
 
 - The **Parser** reads the journal file(s) and produces a `Journal` object containing `Transaction` and other entries.
-- The `Journal` object is passed to the **Balance Sheet Builder** (`calculate_balances_and_lots`) which produces a `BalanceSheet` containing accounts, balances, and identified asset `Lot` objects.
-- Both the original `Journal` (specifically, its list of `Transaction` objects) and the generated `BalanceSheet` are passed as input to the **Capital Gains Calculator** (`calculate_capital_gains`).
-- The **Capital Gains Calculator** uses the transactions to find sales and the `BalanceSheet` lots to perform FIFO matching and calculations.
-- The **Filter** component might be used by the CLI or potentially by the Calculator to narrow down transactions/accounts if needed.
+- The `Journal` object is passed to the **Balance Sheet Builder** (`calculate_balances_and_lots`).
+- The **Balance Sheet Builder** iterates through the `Journal`'s transactions:
+    - It identifies opening postings to create and track `Lot` objects.
+    - Upon encountering closing postings, it performs FIFO matching against tracked lots, calculates gains/losses, updates lot quantities, and **updates the running balances of income/expense accounts directly within the `BalanceSheet` being built.**
+- The final `BalanceSheet` produced by the builder contains all account balances, including the incrementally calculated capital gains/losses reflected in income/expense accounts.
+- The **Filter** component might be used by the CLI before passing the `Journal` to the builder.
 - The **Caching** mechanism is used internally by the **Parser** and related data classes (`PositionAware`).
-- The **Journal Updater** (future) will take results from the Calculator to modify the journal file.
+- The **Journal Updater** (future) might use stored `CapitalGainResult` data from the `BalanceSheet` to modify the journal file.
 
 ## Critical Implementation Paths
 
 - Accurate and efficient parsing of all valid hledger syntax.
-- **Correct implementation of the new FIFO logic within `calculate_capital_gains`, ensuring accurate matching of sales transactions against `BalanceSheet` lots.**
-- **Accurate calculation of proceeds, cost basis, and gain/loss for each matched portion.**
+- **Correct implementation of the integrated FIFO logic within the Balance Sheet Builder (`src/balance.py`), ensuring:**
+    - Accurate matching of sales transactions against tracked lots.
+    - Correct updating of remaining lot quantities.
+    - Accurate calculation of proceeds, cost basis, and gain/loss for each matched portion.
+    - **Correct application of calculated gains/losses to the running balances of income/expense accounts.**
 - Safe and reliable in-place modification of the journal file (future).
 - Designing a flexible and performant filtering engine.
 - Ensuring the caching mechanism provides significant performance improvements for large journals.

@@ -7,6 +7,28 @@ import datetime
 from src.classes import Journal, Transaction, Posting, AccountName, Amount, Commodity, SourceLocation
 from src.balance import BalanceSheet, AssetBalance, CashBalance, Lot # Import BalanceSheet, Balance types, and Lot
 
+def find_open_transactions(journal: Journal) -> List[Transaction]:
+    """Finds transactions that open positions."""
+    open_txns: List[Transaction] = []
+    for entry in journal.entries:
+        if entry.transaction:
+            for posting in entry.transaction.postings:
+                if posting.isOpening():
+                    open_txns.append(entry.transaction)
+                    break # Move to the next transaction once an opening posting is found
+    return open_txns
+
+def find_close_transactions(journal: Journal) -> List[Transaction]:
+    """Finds transactions that close positions."""
+    close_txns: List[Transaction] = []
+    for entry in journal.entries:
+        if entry.transaction:
+            for posting in entry.transaction.postings:
+                if posting.isClosing():
+                    close_txns.append(entry.transaction)
+                    break # Move to the next transaction once a closing posting is found
+    return close_txns
+
 @dataclass
 class CapitalGainResult:
     """Represents the result of a capital gain/loss calculation for a matched sale portion."""
@@ -118,25 +140,3 @@ def calculate_capital_gains(transactions: List[Transaction], balance_sheet: Bala
 
 
     return capital_gain_results
-
-def find_open_transactions(journal: Journal) -> List[Transaction]:
-    """Finds transactions that open positions."""
-    open_txns: List[Transaction] = []
-    for entry in journal.entries:
-        if entry.transaction:
-            for posting in entry.transaction.postings:
-                if posting.isOpening():
-                    open_txns.append(entry.transaction)
-                    break # Move to the next transaction once an opening posting is found
-    return open_txns
-
-def find_close_transactions(journal: Journal) -> List[Transaction]:
-    """Finds transactions that close positions."""
-    close_txns: List[Transaction] = []
-    for entry in journal.entries:
-        if entry.transaction:
-            for posting in entry.transaction.postings:
-                if posting.isClosing():
-                    close_txns.append(entry.transaction)
-                    break # Move to the next transaction once a closing posting is found
-    return close_txns

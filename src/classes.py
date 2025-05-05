@@ -438,12 +438,6 @@ class Posting(PositionAware["Posting"]):
         return s.strip()  # Remove any potential trailing whitespace
 
 
-class TransactionSide(Enum):
-    UNKNOWN = "UNKNOWN"
-    OPEN = "OPEN"
-    CLOSE = "CLOSE"
-
-
 @dataclass(unsafe_hash=True)
 class Transaction(PositionAware["Transaction"]):
     """A transaction in the ledger"""
@@ -451,7 +445,7 @@ class Transaction(PositionAware["Transaction"]):
     date: date
     payee: Union[str, AccountName]
     postings: List[Posting] = field(default_factory=list)
-    comments: List[Comment] = field(default_factory=list)  # Added comments field
+    comments: List[Comment] = field(default_factory=list)
     comment: Optional[Comment] = None
     code: Optional[str] = None
     status: Optional[Status] = None
@@ -473,9 +467,6 @@ class Transaction(PositionAware["Transaction"]):
 
         return s
     
-    def side(self) -> TransactionSide:
-        return TransactionSide.UNKNOWN
-
     def getKey(self):
         """Returns a unique key for the transaction."""
         posting_keys = tuple(

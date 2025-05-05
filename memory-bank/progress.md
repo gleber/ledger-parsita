@@ -25,32 +25,21 @@ This document tracks the progress, completed features, and remaining tasks for l
 
 ## What's Left to Build
 
-- **Phase 1: Remove Non-Functional Code**
-    - Remove `closing_postings` usage from `src/balance.py`.
-    - Remove old `match_fifo` function from `src/capital_gains.py`.
-- **Phase 2: Reimplement Capital Gains FIFO Logic**
-    - Create `calculate_capital_gains` function in `src/capital_gains.py`.
-    - Implement FIFO matching logic (iterate transactions, find sales, match against `BalanceSheet` lots, track remaining quantity).
-    - Define `CapitalGainResult` dataclass.
-    - Integrate into CLI (`src/main.py`).
-    - Add comprehensive `pytest` tests for the new logic.
-- **Future Steps:**
-    - Implement generation of capital gains journal entries.
-    - Implement safe in-place journal file update mechanism.
+- Check existing test files for adherence to the 500-line limit and split if necessary.
+- Implement generation of capital gains journal entries.
+- Implement safe in-place journal file update mechanism.
 - Ensure comprehensive test coverage for all filtering scenarios and edge cases.
 - Implement additional filter types if needed (future).
 - Develop other reporting features (future).
-- Check existing test files for adherence to the 500-line limit and split if necessary.
 
 ## Current Status
 
 - The project's main goal remains implementing the capital gains tracking tool.
-- The immediate next steps involve removing the non-functional `closing_postings` mechanism and starting the reimplementation of the FIFO matching logic as planned.
 - The performance optimization for source position lookups during parsing has been completed and verified by passing tests.
 
 ## Known Issues
 
-- The existing `closing_postings` mechanism and `match_fifo` function in `src/capital_gains.py` are non-functional due to reliance on a missing `Account.closing_postings` attribute. (This is being addressed in Phase 1).
+- None.
 
 ## Evolution of Project Decisions
 

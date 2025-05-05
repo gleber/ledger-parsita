@@ -4,9 +4,7 @@ This document outlines the current focus and active considerations for ledger-pa
 
 ## Current Work Focus
 
-- Removing the non-functional `closing_postings` mechanism.
-- Reimplementing the FIFO matching logic for capital gains calculation.
-- Completed performance optimization for source position lookups during parsing.
+- Refactoring the balance sheet building process (`src/balance.py`) to integrate incremental capital gains calculation.
 
 ## Recent Changes
 
@@ -35,38 +33,38 @@ This document outlines the current focus and active considerations for ledger-pa
 - **Modified `PositionAware.set_filename` to use the `SourceCacheManager` for efficient line/column calculation.**
 - **Resolved an `ImportError` in `tests/test_filtering.py` and an `AttributeError` in `SourceCacheManager` during testing.**
 - **Changed `SourceCacheManager` to use `__init__` instead of `__new__` while keeping the global instance, as requested.**
-- **Planned the removal of the non-functional `closing_postings` mechanism and the reimplementation strategy for FIFO matching.**
 - Added `isCrypto()` method to `Commodity` class in `src/classes.py` and added tests for it in `tests/test_classes.py`.
 - Fixed `AttributeError: 'Account' object has no attribute 'isAsset'` in `src/main.py` by accessing `account.name.isAsset()`.
 - Added a rule that each test file must contain at most 500 lines of code.
 
 ## Next Steps
 
-- **Phase 1: Removal**
-    - Modify `src/balance.py`: Remove code attempting to use `account.closing_postings`.
-    - Modify `src/capital_gains.py`: Remove the old `match_fifo` function.
-- **Phase 2: Reimplementation**
-    - Create new function `calculate_capital_gains(transactions: List[Transaction], balance_sheet: BalanceSheet)` in `src/capital_gains.py`.
-    - Implement core FIFO logic within `calculate_capital_gains`:
-        - Track remaining lot quantities mutably.
-        - Iterate transactions to find closing postings (`posting.isClosing()`).
-        - Determine proceeds from the same transaction.
-        - Match closing quantity against available lots (FIFO).
-        - Calculate cost basis, proceeds, and gain/loss for each match.
-        - Update remaining lot quantities.
-    - Define `CapitalGainResult` dataclass to structure the output.
-    - Integrate the new `calculate_capital_gains` function into the CLI (`src/main.py`).
-    - Add comprehensive `pytest` tests for the new logic.
-- Design and implement the mechanism for generating new journal entries for capital gains transactions (future step after calculation works).
-- Design and implement the safe in-place journal file update mechanism (future step).
+**Phase 1: Integrate Capital Gains Calculation into Balance Sheet Builder**
+1.  **Move Logic:** Transfer the core FIFO matching and gain/loss calculation logic from `src/capital_gains.py::calculate_capital_gains` into `src/balance.py`, likely as a helper function called by `calculate_balances_and_lots`.
+2.  **Modify `calculate_balances_and_lots` (`src/balance.py`):**
+    *   Integrate the call to the moved FIFO logic when a closing posting is encountered.
+    *   Ensure the logic correctly updates the `remaining_quantity` of lots tracked within the `BalanceSheet` state.
+    *   **Implement the application of calculated gains/losses to the running balances of appropriate income/expense accounts (e.g., `income:capital_gains`, `expenses:capital_losses`) within the `BalanceSheet` object being built.**
+    *   Optionally, add logic to store `CapitalGainResult` objects in the `BalanceSheet`.
+3.  **Refactor/Remove `src/capital_gains.py`:** Remove the now redundant `calculate_capital_gains` function. Decide whether to keep/move `CapitalGainResult`.
+4.  **Update `BalanceSheet` Class (Optional):** Consider adding `capital_gains_realized: List[CapitalGainResult]` field in `src/classes.py`.
+5.  **Update Tests:**
+    *   Adapt/move tests from `tests/test_capital_gains_fifo.py` to `tests/test_balance.py`.
+    *   Add new tests in `tests/test_balance.py` to verify the integrated calculation and its impact on income/expense balances and lot quantities.
+
+**Phase 2: Future Steps**
+- Design and implement the mechanism for generating new journal entries for capital gains transactions (potentially using stored `CapitalGainResult` data).
+- Design and implement the safe in-place journal file update mechanism.
 - Check existing test files to ensure they adhere to the new 500-line limit and split them if necessary.
 
 ## Active Decisions and Considerations
 
-- How to best represent the parsed hledger data structure in Python.
+- **Integrating capital gains calculation directly into the balance sheet building process.**
+- How to efficiently track lots and apply gains/losses to running balances within `calculate_balances_and_lots`.
+- Determining the appropriate income/expense accounts for posting gains/losses (e.g., `income:capital_gains`, `expenses:capital_losses`).
+- Structure and storage of `CapitalGainResult` objects if needed for future journal updates.
 - Design of the filtering API.
 - Implementation details of the in-memory caching for source position lookups.
-- Specific approach for FIFO matching: Iterate transactions, use `BalanceSheet` lots, track remaining quantity mutably.
 
 ## Important Patterns and Preferences
 
@@ -81,4 +79,3 @@ This document outlines the current focus and active considerations for ledger-pa
 - Successfully refactored existing `unittest` tests to `pytest` style, improving test readability and maintainability.
 - Gained experience in implementing and integrating in-memory caching for performance optimization.
 - Encountered and resolved issues related to file path handling and import mechanisms during development.
-- Identified non-functional code (`closing_postings` mechanism) and planned its removal and replacement.
