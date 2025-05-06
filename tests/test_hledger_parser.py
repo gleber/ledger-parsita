@@ -160,6 +160,28 @@ def test_posting_parser_short():
     )
 
 
+def test_balance_assertion_with_cost_parser():
+    balance_text = "assets:broker:tastytrade:SOL:20230101  = 10 SOL @@ 20 USD"
+    result = HledgerParsers.posting.parse(balance_text)
+    posting = result.unwrap()
+    assert isinstance(posting.account, AccountName)
+    assert posting.account.parts == ["assets", "broker", "tastytrade", "SOL", "20230101"]
+    assert posting.amount is None  # Balance assertions don't have a direct 'amount' in the Posting object
+    assert posting.balance is not None
+    assert posting.balance.strip_loc() == Amount(
+        quantity=Decimal("10"), commodity=Commodity("SOL")
+    )
+    assert posting.cost is not None # This is the key part for this test
+    assert posting.cost.strip_loc() == Cost(
+        kind=CostKind.TotalCost, # '@@' implies total cost for the balance
+        amount=Amount(quantity=Decimal("20"), commodity=Commodity("USD")) # This is per unit cost in hledger for balance
+    )
+
+    assert posting.cost.kind == CostKind.TotalCost
+    assert posting.cost.amount.quantity == Decimal("20")
+    assert posting.cost.amount.commodity.name == "USD"
+
+
 def test_posting_parser():
     posting_text = "assets:broker:bitstamp  1,349.20 USD"
     result = HledgerParsers.posting.parse(posting_text)

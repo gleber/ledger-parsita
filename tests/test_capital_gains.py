@@ -1,7 +1,7 @@
 import pytest
 from datetime import date
 from decimal import Decimal
-import re
+from pathlib import Path
 
 from src.classes import (
     Journal,
@@ -13,261 +13,147 @@ from src.classes import (
     SourceLocation,
     JournalEntry,
     CostKind,
-    Cost # Import Cost
+    Cost,
+    CapitalGainResult
 )
-from src.capital_gains import (
-    find_open_transactions,
-    find_close_transactions,
-)
-from src.balance import BalanceSheet # Updated import
+from src.balance import BalanceSheet, CashBalance, AssetBalance
 
 
-# Helper function to create a simple journal for testing
-def create_test_journal(transactions_data):
-    journal = Journal(entries=[])
-    for data in transactions_data:
-        postings = []
-        for posting_data in data["postings"]:
-            amount = None
-            if "amount" in posting_data and posting_data["amount"] is not None:
-                amount_data = posting_data["amount"]
-                if "quantity" in amount_data and "commodity" in amount_data:
-                    amount = Amount(
-                        quantity=Decimal(str(amount_data["quantity"])),
-                        commodity=Commodity(name=amount_data["commodity"]),
-                    )
-            cost = None
-            if "cost" in posting_data and posting_data["cost"] is not None:
-                cost_data = posting_data["cost"]
-                if "kind" in cost_data and "amount" in cost_data:
-                    cost_amount_data = cost_data["amount"]
-                    cost_amount = Amount(
-                        quantity=Decimal(str(cost_amount_data["quantity"])),
-                        commodity=Commodity(name=cost_amount_data["commodity"]),
-                    )
-                    # Create a Cost object instead of a tuple
-                    cost = Cost(kind=CostKind(cost_data["kind"]), amount=cost_amount)
+def test_capital_gains_rsu_style_income_then_sale():
+    """
+    Tests capital gains calculation for shares acquired via an income posting (like RSUs)
+    and then sold. Assumes $0 cost basis if income posting has no explicit price.
+    """
+    journal_string = """
+2014-12-31 * Deposit GOOG Single RS
+    assets:broker:schwab:GOOG:20141226          4 GOOG
+    income:google:equity                       -4 GOOG
 
-            postings.append(
-                Posting(
-                    account=AccountName(parts=posting_data["account"].split(":")),
-                    amount=amount,
-                    cost=cost
-                )
-            )
-        journal.entries.append(
-            JournalEntry.create(
-                Transaction(
-                    date=date.fromisoformat(data["date"]),
-                    payee=data["payee"],
-                    postings=postings,
-                )
-            )
-        )
-    return journal
+2019-09-27 * Sale GOOG Single Share Sale
+    assets:broker:schwab                             4972.04 USD
+    assets:broker:schwab:GOOG:20141226    -4 GOOG @@ 4972.04 USD
+"""
+    # Using a dummy path as it's not strictly needed for content parsing here
+    journal = Journal.parse_from_content(journal_string, Path("test_rsu.journal")).unwrap()
+    balance_sheet = BalanceSheet.from_journal(journal)
 
+    assert len(balance_sheet.capital_gains_realized) == 1
+    gain_result = balance_sheet.capital_gains_realized[0]
 
-def test_find_open_transactions():
-    transactions_data = [
-        {
-            "date": "2023-01-01",
-            "payee": "Open AAPL",
-            "postings": [
-                {
-                    "account": "assets:stocks:AAPL",
-                    "amount": {"quantity": Decimal("10"), "commodity": "AAPL"},
-                },
-                {
-                    "account": "equity:opening balances",
-                    "amount": {"quantity": Decimal("-10"), "commodity": "AAPL"},
-                },
-            ],
-        },
-        {
-            "date": "2023-01-02",
-            "payee": "Buy Groceries",
-            "postings": [
-                {
-                    "account": "expenses:food",
-                    "amount": {"quantity": Decimal("50"), "commodity": "USD"},
-                },
-                {
-                    "account": "assets:cash",
-                    "amount": {"quantity": Decimal("-50"), "commodity": "USD"},
-                },
-            ],
-        },
-    ]
-    journal = create_test_journal(transactions_data)
-    open_txns = find_open_transactions(journal)
+    assert gain_result.closing_posting.account.name == "assets:broker:schwab:GOOG:20141226"
+    assert gain_result.matched_quantity.quantity == Decimal("4")
+    assert gain_result.matched_quantity.commodity.name == "GOOG"
+    
+    # Cost basis should be 0 as the income posting doesn't specify a price for GOOG
+    # and the asset posting itself doesn't have a cost basis (e.g. @@ X USD)
+    assert gain_result.cost_basis.quantity == Decimal("0") 
+    assert gain_result.cost_basis.commodity.name == "USD" # Assuming USD is the cost basis currency or default
 
-    # Expected open transaction is the first one
-    assert len(open_txns) == 1
-    assert open_txns[0].payee == "Open AAPL"
+    assert gain_result.proceeds.quantity == Decimal("4972.04")
+    assert gain_result.proceeds.commodity.name == "USD"
+
+    assert gain_result.gain_loss.quantity == Decimal("4972.04") # Proceeds - 0 cost basis
+    assert gain_result.gain_loss.commodity.name == "USD"
+    
+    assert gain_result.closing_date == date(2019, 9, 27)
+    assert gain_result.acquisition_date == date(2014, 12, 31)
+
+    # Verify the asset account is now zero
+    asset_account = balance_sheet.get_account(AccountName(parts=["assets", "broker", "schwab", "GOOG", "20141226"]))
+    assert asset_account is not None
+    asset_balance = asset_account.get_own_balance(Commodity("GOOG"))
+    assert isinstance(asset_balance, AssetBalance) 
+    assert asset_balance.total_amount.quantity == Decimal("0")
 
 
-def test_find_close_transactions():
-    transactions_data = [
-        {
-            "date": "2023-01-01",
-            "payee": "Open AAPL",
-            "postings": [
-                {
-                    "account": "assets:stocks:AAPL",
-                    "amount": {"quantity": Decimal("10"), "commodity": "AAPL"},
-                },
-                {
-                    "account": "equity:opening balances",
-                    "amount": {"quantity": Decimal("-10"), "commodity": "AAPL"},
-                },
-            ],
-        },
-        {
-            "date": "2023-01-02",
-            "payee": "Sell AAPL",
-            "postings": [
-                {
-                    "account": "assets:stocks:AAPL",
-                    "amount": {"quantity": Decimal("-5"), "commodity": "AAPL"},
-                },
-                {
-                    "account": "assets:cash",
-                    "amount": {"quantity": Decimal("1000"), "commodity": "USD"},
-                },
-                {
-                    "account": "income:capital gains",
-                    "amount": {"quantity": Decimal("-100"), "commodity": "USD"},
-                },
-            ],
-        },
-        {
-            "date": "2023-01-03",
-            "payee": "Buy Groceries",
-            "postings": [
-                {
-                    "account": "expenses:food",
-                    "amount": {"quantity": Decimal("50"), "commodity": "USD"},
-                },
-                {
-                    "account": "assets:cash",
-                    "amount": {"quantity": Decimal("-50"), "commodity": "USD"},
-                },
-            ],
-        },
-    ]
-    journal = create_test_journal(transactions_data)
-    close_txns = find_close_transactions(journal)
+def test_capital_gains_opening_balance_then_partial_sell():
+    """
+    Tests capital gains calculation when assets are introduced via a balance assertion
+    and then a portion is sold.
+    """
+    journal_string = """
+2023-01-01 * Opening Balance SOL
+    assets:broker:tastytrade:SOL:20230101  = 10 SOL @@ 20 USD
 
-    # Expected close transaction is the second one
-    assert len(close_txns) == 1
-    assert close_txns[0].payee == "Sell AAPL"
+2023-02-01 * Sell Partial SOL
+    assets:broker:tastytrade     210.60 USD  ; Proceeds from 2 SOL @ 105.30 USD
+    assets:broker:tastytrade:SOL:20230101    -2 SOL @@ 105.30 USD
+    expenses:trading_fees        1.00 USD
+"""
+    # Using a dummy path as it's not strictly needed for content parsing here
+    # The .unwrap() call will raise an error if parsing fails.
+    journal = Journal.parse_from_content(journal_string, Path("test_opening_balance_sell.journal")).unwrap()
+    balance_sheet = BalanceSheet.from_journal(journal)
+
+    assert len(balance_sheet.capital_gains_realized) == 1
+    gain_result = balance_sheet.capital_gains_realized[0]
+
+    assert gain_result.closing_posting.account.parts == ["assets", "broker", "tastytrade", "SOL", "20230101"]
+    assert gain_result.matched_quantity.quantity == Decimal("2")
+    assert gain_result.matched_quantity.commodity.name == "SOL"
+    
+    # Cost basis: 10 SOL @@ 20 USD means 1 SOL costs 2 USD. For 2 SOL, cost is 2 * 2 = 4 USD.
+    assert gain_result.cost_basis.quantity == Decimal("4.00") 
+    assert gain_result.cost_basis.commodity.name == "USD"
+
+    # Proceeds: 2 SOL * 105.30 USD/SOL = 210.60 USD
+    assert gain_result.proceeds.quantity == Decimal("210.60")
+    assert gain_result.proceeds.commodity.name == "USD"
+
+    # Gain/Loss: 210.60 USD (proceeds) - 4.00 USD (cost basis) = 206.60 USD
+    assert gain_result.gain_loss.quantity == Decimal("206.60")
+    assert gain_result.gain_loss.commodity.name == "USD"
+    
+    assert gain_result.closing_date == date(2023, 2, 1)
+    assert gain_result.acquisition_date == date(2023, 1, 1) # From dated subaccount (year directive + date in account)
+
+    # Verify the remaining asset account balance
+    asset_account = balance_sheet.get_account(AccountName(parts=["assets", "broker", "tastytrade", "SOL", "20230101"])) # This is correct
+    assert asset_account is not None
+    asset_balance = asset_account.get_own_balance(Commodity("SOL"))
+    assert isinstance(asset_balance, AssetBalance) 
+    assert asset_balance.total_amount.quantity == Decimal("8") # 10 initial - 2 sold = 8 remaining
+    # Check remaining lots
+    assert len(asset_balance.lots) == 1
+    assert asset_balance.lots[0].remaining_quantity == Decimal("8") # Check remaining_quantity
+    assert asset_balance.lots[0].cost_basis_per_unit.quantity == Decimal("2") # Cost per unit was 2 USD/SOL
+    assert asset_balance.lots[0].cost_basis_per_unit.commodity.name == "USD"
 
 
-def test_find_open_transactions_excludes_cash():
-    transactions_data = [
-        {
-            "date": "2023-01-01",
-            "payee": "Open AAPL",
-            "postings": [
-                {
-                    "account": "assets:stocks:AAPL",
-                    "amount": {"quantity": Decimal("10"), "commodity": "AAPL"},
-                },
-                {
-                    "account": "equity:opening balances",
-                    "amount": {"quantity": Decimal("-10"), "commodity": "AAPL"},
-                },
-            ],
-        },
-        {
-            "date": "2023-01-02",
-            "payee": "Deposit USD",
-            "postings": [
-                {
-                    "account": "assets:cash:USD",
-                    "amount": {"quantity": Decimal("1000"), "commodity": "USD"},
-                },
-                {
-                    "account": "equity:opening balances",
-                    "amount": {"quantity": Decimal("-1000"), "commodity": "USD"},
-                },
-            ],
-        },
-        {
-            "date": "2023-01-03",
-            "payee": "Deposit PLN",
-            "postings": [
-                {
-                    "account": "assets:cash:PLN",
-                    "amount": {"quantity": Decimal("500"), "commodity": "PLN"},
-                },
-                {
-                    "account": "equity:opening balances",
-                    "amount": {"quantity": Decimal("-500"), "commodity": "PLN"},
-                },
-            ],
-        },
-    ]
-    journal = create_test_journal(transactions_data)
-    open_txns = find_open_transactions(journal)
+def test_capital_gains_opening_balance_then_partial_sell_all():
+    """
+    Tests capital gains calculation when assets are introduced via a balance assertion
+    and then a portion is sold.
+    """
+    journal_string = """
+2023-01-01 * Opening Balance SOL
+    assets:broker:tastytrade:SOL:20230101  = 10 SOL @@ 20 USD
 
-    # Expected open transaction is the first one (AAPL), cash transactions should be excluded
-    assert len(open_txns) == 1
-    assert open_txns[0].payee == "Open AAPL"
+2023-02-01 * Sell Partial SOL
+    assets:broker:tastytrade     1000 USD
+    assets:broker:tastytrade:SOL:20230101    -10 SOL
+"""
+    journal = Journal.parse_from_content(journal_string, Path("test_opening_balance_sell.journal")).unwrap().strip_loc()
+    balance_sheet = BalanceSheet.from_journal(journal)
+
+    assert len(balance_sheet.capital_gains_realized) == 1
 
 
-def test_find_close_transactions_excludes_cash():
-    transactions_data = [
-        {
-            "date": "2023-01-01",
-            "payee": "Sell AAPL",
-            "postings": [
-                {
-                    "account": "assets:stocks:AAPL",
-                    "amount": {"quantity": Decimal("-5"), "commodity": "AAPL"},
-                },
-                {
-                    "account": "assets:cash",
-                    "amount": {"quantity": Decimal("1000"), "commodity": "USD"},
-                },
-                {
-                    "account": "income:capital gains",
-                    "amount": {"quantity": Decimal("-100"), "commodity": "USD"},
-                },
-            ],
-        },
-        {
-            "date": "2023-01-02",
-            "payee": "Withdraw USD",
-            "postings": [
-                {
-                    "account": "assets:cash:USD",
-                    "amount": {"quantity": Decimal("-200"), "commodity": "USD"},
-                },
-                {
-                    "account": "expenses:withdrawal",
-                    "amount": {"quantity": Decimal("200"), "commodity": "USD"},
-                },
-            ],
-        },
-        {
-            "date": "2023-01-03",
-            "payee": "Withdraw PLN",
-            "postings": [
-                {
-                    "account": "assets:cash:PLN",
-                    "amount": {"quantity": Decimal("-100"), "commodity": "PLN"},
-                },
-                {
-                    "account": "expenses:withdrawal",
-                    "amount": {"quantity": Decimal("100"), "commodity": "PLN"},
-                },
-            ],
-        },
-    ]
-    journal = create_test_journal(transactions_data)
-    close_txns = find_close_transactions(journal)
 
-    # Expected close transaction is the first one (AAPL), cash transactions should be excluded
-    assert len(close_txns) == 1
-    assert close_txns[0].payee == "Sell AAPL"
+def test_capital_gains_opening_balance_without_cost_then_partial_sell():
+    """
+    Tests capital gains calculation when assets are introduced via a balance assertion
+    and then a portion is sold.
+    """
+    journal_string = """
+2022-12-31 * "Opening state"
+  assets:broker:tastytrade  = 293.33518632 SOL
+
+2023-12-29 Sold 25 SOL/USD @ 105.30
+  assets:broker:tastytrade  2632.50 USD
+  assets:broker:tastytrade  -25 SOL @ 105.30 USD
+"""
+    journal = Journal.parse_from_content(journal_string, Path("test_opening_balance_sell.journal")).unwrap().strip_loc()
+    balance_sheet = BalanceSheet.from_journal(journal)
+
+    assert len(balance_sheet.capital_gains_realized) == 1

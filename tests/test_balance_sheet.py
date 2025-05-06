@@ -70,3 +70,4 @@ def test_get_account_empty_balancesheet():
 
 # Note: Testing finding accounts created by apply_transaction is implicitly done
 # when running other tests that build a balance sheet from transactions.
+

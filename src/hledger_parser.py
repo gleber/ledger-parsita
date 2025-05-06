@@ -182,18 +182,19 @@ class HledgerParsers(ParserContext, whitespace=None):
 
     # A non-indented posting
     posting: PositionedParser[str, Posting] = positioned(
-        account_name
-        & opt(ws >> amount)
-        & opt(ws >> cost)
-        & opt(ws >> balance)
-        & opt(ws >> inline_comment) << ows
-        > (
-            lambda parts: Posting(
-                account=parts[0],
-                amount=oneify(parts[1]),
-                cost=oneify(parts[2]),
-                balance=oneify(parts[3]),
-                comment=oneify(parts[4]),
+        (
+            account_name 
+            & opt(ws >> amount) 
+            & opt(ws >> balance) 
+            & opt(ws >> cost) 
+            & opt(ws >> inline_comment) << ows
+        ) > splat(
+            lambda acc, amt_opt, bal_opt, cost_opt, comm_opt: Posting(
+                account=acc,
+                amount=oneify(amt_opt),
+                balance=oneify(bal_opt),
+                cost=oneify(cost_opt),
+                comment=oneify(comm_opt),
             )
         )
     )  # Filename will be populated later

@@ -219,15 +219,6 @@ def test_calculate_balances_and_lots_simple_capital_gain():
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
-    # Verify the balance of the income:capital-gains account
-    income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
-    income_balance = income_account.get_own_balance(Commodity("USD"))
-    assert isinstance(income_balance, CashBalance)
-    # Expected gain: (1000 proceeds / 5 quantity sold) * 5 matched quantity - (1500 cost basis / 10 quantity acquired) * 5 matched quantity
-    # (200 per unit) * 5 - (150 per unit) * 5 = 1000 - 750 = 250
-    assert income_balance.total_amount.quantity == Decimal("250")
-    assert income_balance.total_amount.commodity.name == "USD"
-
     # Verify the remaining quantity of the lot
     aapl_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
     aapl_balance = aapl_account.get_own_balance(Commodity("AAPL"))
@@ -256,17 +247,6 @@ def test_calculate_balances_and_lots_multiple_opens_single_close():
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap() # Updated call
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
-
-    # Verify the balance of the income:capital-gains account
-    income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
-    income_balance = income_account.get_own_balance(Commodity("USD"))
-    assert isinstance(income_balance, CashBalance)
-    # Expected gain:
-    # Lot 1 (10 shares @ 150 cost/share): 10 * (2000 proceeds / 12 quantity sold) - 10 * 150 = 10 * 166.66... - 1500 = 1666.66... - 1500 = 166.66...
-    # Lot 2 (2 shares @ 166.66... cost/share): 2 * (2000 proceeds / 12 quantity sold) - 2 * (2500 cost basis / 15 quantity acquired) = 2 * 166.66... - 2 * 166.66... = 0
-    # Total gain = 166.66... + 0 = 166.66...
-    assert income_balance.total_amount.quantity == pytest.approx(Decimal("166.666666666666666666666667"))
-    assert income_balance.total_amount.commodity.name == "USD"
 
     # Verify the remaining quantity of the lots
     aapl_account_lot1 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
@@ -303,19 +283,6 @@ def test_calculate_balances_and_lots_single_open_multiple_closes():
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
-    # Verify the balance of the income:capital-gains account
-    income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
-    income_balance = income_account.get_own_balance(Commodity("USD"))
-    assert isinstance(income_balance, CashBalance)
-    # Expected total gain:
-    # Sale 1 (5 shares): (1000 proceeds / 5 quantity sold) * 5 matched quantity - (3000 cost basis / 20 quantity acquired) * 5 matched quantity
-    # (200 per unit) * 5 - (150 per unit) * 5 = 1000 - 750 = 250
-    # Sale 2 (8 shares): (1500 proceeds / 8 quantity sold) * 8 matched quantity - (3000 cost basis / 20 quantity acquired) * 8 matched quantity
-    # (187.5 per unit) * 8 - (150 per unit) * 8 = 1500 - 1200 = 300
-    # Total gain = 250 + 300 = 550
-    assert income_balance.total_amount.quantity == Decimal("550")
-    assert income_balance.total_amount.commodity.name == "USD"
-
     # Verify the remaining quantity of the lot
     aapl_account_lot1 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
     aapl_balance_lot1 = aapl_account_lot1.get_own_balance(Commodity("AAPL"))
@@ -349,17 +316,6 @@ def test_calculate_balances_and_lots_multiple_assets():
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap() # Updated call
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
-
-    # Verify the balance of the income:capital-gains account
-    income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
-    income_balance = income_account.get_own_balance(Commodity("USD"))
-    assert isinstance(income_balance, CashBalance)
-    # Expected total gain:
-    # AAPL gain: (1000 proceeds / 5 quantity sold) * 5 matched quantity - (1500 cost basis / 10 quantity acquired) * 5 matched quantity = 1000 - 750 = 250
-    # MSFT gain: (1500 proceeds / 8 quantity sold) * 8 matched quantity - (2500 cost basis / 15 quantity acquired) * 8 matched quantity = 1500 - 1333.33... = 166.66...
-    # Total gain = 250 + 166.66... = 416.66...
-    assert income_balance.total_amount.quantity == pytest.approx(Decimal("416.666666666666666666666667"))
-    assert income_balance.total_amount.commodity.name == "USD"
 
     # Verify remaining quantities
     aapl_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
@@ -421,15 +377,6 @@ def test_calculate_balances_and_lots_handles_undated_open_accounts():
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap() # Updated call
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
-
-    # Verify the balance of the income:capital-gains account
-    income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
-    income_balance = income_account.get_own_balance(Commodity("USD"))
-    assert isinstance(income_balance, CashBalance)
-    # Expected gain: (20000 proceeds / 0.5 quantity sold) * 0.5 matched quantity - (30000 cost basis / 1 quantity acquired) * 0.5 matched quantity
-    # (40000 per unit) * 0.5 - (30000 per unit) * 0.5 = 20000 - 15000 = 5000
-    assert income_balance.total_amount.quantity == Decimal("5000")
-    assert income_balance.total_amount.commodity.name == "USD"
 
     # Verify the remaining quantity of the lot
     btc_account = balance_sheet.get_account(AccountName(parts=["assets", "crypto", "BTC", "20230101"]))

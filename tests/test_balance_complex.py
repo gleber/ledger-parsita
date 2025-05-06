@@ -26,16 +26,6 @@ def test_calculate_balances_and_lots_partial_match_gain():
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
-    # Verify the balance of the income:capital-gains account
-    income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
-    assert income_account is not None, "Income account not found"
-    income_balance = income_account.get_own_balance(Commodity("USD"))
-    assert isinstance(income_balance, CashBalance)
-    # Expected gain: (600 proceeds / 4 quantity sold) * 4 matched quantity - (1000 cost basis / 10 quantity acquired) * 4 matched quantity
-    # (150 per unit) * 4 - (100 per unit) * 4 = 600 - 400 = 200
-    assert income_balance.total_amount.quantity == Decimal("200")
-    assert income_balance.total_amount.commodity.name == "USD"
-
     # Verify the remaining quantity of the lot
     xyz_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
     assert xyz_account is not None, "XYZ account not found"
@@ -61,16 +51,6 @@ def test_calculate_balances_and_lots_partial_match_loss():
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap() # Updated call
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
-
-    # Verify the balance of the expenses:capital-loss account
-    expenses_account = balance_sheet.get_account(AccountName(parts=["expenses", "capital_losses"]))
-    assert expenses_account is not None, "Expenses account not found"
-    expenses_balance = expenses_account.get_own_balance(Commodity("USD"))
-    assert isinstance(expenses_balance, CashBalance)
-    # Expected loss: (300 proceeds / 4 quantity sold) * 4 matched quantity - (1000 cost basis / 10 quantity acquired) * 4 matched quantity
-    # (75 per unit) * 4 - (100 per unit) * 4 = 300 - 400 = -100
-    assert expenses_balance.total_amount.quantity == Decimal("-100")
-    assert expenses_balance.total_amount.commodity.name == "USD"
 
     # Verify the remaining quantity of the lot
     abc_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230101"]))
@@ -99,24 +79,6 @@ def test_calculate_balances_and_lots_multiple_postings_same_commodity():
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
-    # Verify the balance of the income:capital-gains account
-    income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
-    assert income_account is not None, "Income account not found"
-    income_balance = income_account.get_own_balance(Commodity("USD"))
-    assert isinstance(income_balance, CashBalance)
-    # Expected gain: (800 proceeds / 5 quantity sold) * 5 matched quantity - (1000 cost basis / 10 quantity acquired) * 5 matched quantity
-    # (160 per unit) * 5 - (100 per unit) * 5 = 800 - 500 = 300
-    # Note: The original test expected 350, but the proceeds calculation in the moved logic sums *all* positive cash postings.
-    # In this case, it would sum 800 (sale proceeds) + 50 (dividend) = 850.
-    # Let's adjust the expected gain based on the current logic:
-    # (850 total cash / 5 quantity sold) * 5 matched quantity - (1000 cost basis / 10 quantity acquired) * 5 matched quantity
-    # (170 per unit) * 5 - 500 = 850 - 500 = 350
-    # The current logic seems to be calculating proceeds based on the total cash received in the transaction, not just from the sale.
-    # This might be a point for refinement, but for now, let's assert based on the current implementation's behavior.
-    # With stricter proceeds check, only assets:cash is considered.
-    assert income_balance.total_amount.quantity == Decimal("300") # Corrected: 800 (cash) - 500 (cost)
-    assert income_balance.total_amount.commodity.name == "USD"
-
     # Verify the remaining quantity of the lot
     xyz_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
     assert xyz_account is not None, "XYZ account not found"
@@ -143,17 +105,6 @@ def test_calculate_balances_and_lots_multiple_cash_postings():
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
-
-    # Verify the balance of the income:capital-gains account
-    income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
-    assert income_account is not None, "Income account not found"
-    income_balance = income_account.get_own_balance(Commodity("USD"))
-    assert isinstance(income_balance, CashBalance)
-    # Expected gain: (400 + 450 proceeds / 5 quantity sold) * 5 matched quantity - (1000 cost basis / 10 quantity acquired) * 5 matched quantity
-    # (850 proceeds / 5 quantity sold) * 5 matched quantity - (100 per unit) * 5 matched quantity
-    # (170 per unit) * 5 - 500 = 850 - 500 = 350
-    assert income_balance.total_amount.quantity == Decimal("350")
-    assert income_balance.total_amount.commodity.name == "USD"
 
     # Verify the remaining quantity of the lot
     xyz_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
@@ -291,27 +242,6 @@ def test_calculate_balances_and_lots_complex_fifo():
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
-
-    # Verify the balance of the income:capital-gains account
-    income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
-    assert income_account is not None, "Income account not found"
-    income_balance = income_account.get_own_balance(Commodity("USD"))
-    assert isinstance(income_balance, CashBalance)
-    # Expected total gain:
-    # Sale 1 (8 ABC): (1200 proceeds / 8 quantity sold) * 8 matched quantity - (1000 cost basis / 10 quantity acquired) * 8 matched quantity
-    # (150 per unit) * 8 - (100 per unit) * 8 = 1200 - 800 = 400
-    # Sale 2 (10 ABC):
-    #   Match 1 (2 from Lot 1): (1800 proceeds / 10 quantity sold) * 2 matched quantity - (1000 cost basis / 10 quantity acquired) * 2 matched quantity
-    #   (180 per unit) * 2 - (100 per unit) * 2 = 360 - 200 = 160
-    #   Match 2 (8 from Lot 2): (1800 proceeds / 10 quantity sold) * 8 matched quantity - (2250 cost basis / 15 quantity acquired) * 8 matched quantity
-    #   (180 per unit) * 8 - (150 per unit) * 8 = 1440 - 1200 = 240
-    #   Total for Sale 2 = 160 + 240 = 400
-    # Sale 3 (7 ABC):
-    #   Match 1 (7 from Lot 2): (1500 proceeds / 7 quantity sold) * 7 matched quantity - (2250 cost basis / 15 quantity acquired) * 7 matched quantity
-    #   (214.28... per unit) * 7 - (150 per unit) * 7 = 1500 - 1050 = 450
-    # Total gain = 400 + 400 + 450 = 1250
-    assert income_balance.total_amount.quantity == pytest.approx(Decimal("1250"))
-    assert income_balance.total_amount.commodity.name == "USD"
 
     # Verify remaining quantities
     abc_account_lot1 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230101"]))

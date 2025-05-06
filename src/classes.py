@@ -501,28 +501,48 @@ class Transaction(PositionAware["Transaction"]):
         if target_posting.cost:
             return target_posting.cost
 
-        # Attempt to infer cost (Variant 3: two postings, different commodities)
+        # Attempt to infer cost if transaction has exactly two postings
         if len(self.postings) == 2:
-            posting1 = self.postings[0]
-            posting2 = self.postings[1]
+            p1 = self.postings[0]
+            p2 = self.postings[1]
 
-            # Ensure both postings have amounts and different commodities
-            if posting1.amount is not None and posting2.amount is not None:
-                amt1 = posting1.amount
-                amt2 = posting2.amount
+            # Both postings must have amounts to infer cost
+            if p1.amount and p2.amount:
+                amt1 = p1.amount
+                amt2 = p2.amount
+
+                # Case 1: Different commodities (e.g., asset purchase with cash or currency exchange)
                 if amt1.commodity != amt2.commodity:
-                    # Determine which posting is the target and which is the other
-                    other_posting = None
-                    if target_posting == posting1:
-                        other_posting = posting2
-                    elif target_posting == posting2:
-                        other_posting = posting1
-
-                    if other_posting and other_posting.amount is not None: # Add explicit check here too
-                        # Infer total cost (@@) based on the other posting's amount
-                        # The inferred cost amount is the absolute value of the other posting's amount
+                    other_posting = p2 if target_posting == p1 else p1
+                    # This logic infers the cost of target_posting from other_posting.
+                    # It's assumed that in a 2-posting transaction with different commodities,
+                    # one is the "price" of the other.
+                    if other_posting.amount: # Ensure other_posting has an amount
                         inferred_amount = Amount(abs(other_posting.amount.quantity), other_posting.amount.commodity)
                         return Cost(kind=CostKind.TotalCost, amount=inferred_amount)
+
+                # Case 2: Same commodities (e.g., RSU-like income leading to asset acquisition)
+                elif amt1.commodity == amt2.commodity and target_posting.isOpening():
+                    # target_posting is the asset acquisition (e.g., +4 GOOG)
+                    # The other posting should be the income offset (e.g., -4 GOOG from income:...)
+                    other_posting = p2 if target_posting == p1 else p1
+
+                    # Check if other_posting is from an income account and has the opposite quantity of target_posting
+                    if other_posting.amount and \
+                       target_posting.amount and \
+                       other_posting.amount.quantity == -target_posting.amount.quantity and \
+                       other_posting.account.name.startswith("income:"):
+                        
+                        # Infer $0 cost basis.
+                        # Determine currency for the $0 cost: use a cash commodity from the transaction if available, else default to USD.
+                        zero_cost_currency = Commodity("USD") # Default
+                        for post_in_tx in self.postings: # self.postings refers to the transaction's postings
+                            if post_in_tx.amount and post_in_tx.amount.commodity.isCash():
+                                zero_cost_currency = post_in_tx.amount.commodity
+                                break
+                        
+                        zero_cost_amount = Amount(Decimal(0), zero_cost_currency)
+                        return Cost(kind=CostKind.UnitCost, amount=zero_cost_amount)
 
         return None # No explicit cost and inference not possible
 

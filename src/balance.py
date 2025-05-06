@@ -6,7 +6,7 @@ import datetime
 from datetime import date
 from collections import defaultdict # Import defaultdict
 
-from src.classes import AccountName, Amount, Commodity, Posting, Transaction, CostKind, CommodityKind, CapitalGainResult, Comment, Journal # Import Journal
+from src.classes import AccountName, Amount, Commodity, Posting, Transaction, Cost, CostKind, CommodityKind, CapitalGainResult, Comment, Journal # Import Journal
 
 @dataclass
 class Lot:
@@ -261,78 +261,106 @@ class BalanceSheet:
 
     def _apply_direct_posting_effects(self, posting: Posting, transaction: Transaction):
         """Applies direct effects of a posting: updates own balance, creates lots for acquisitions."""
-        if posting.amount is None:
-            return
-        
-        current_amount: Amount = posting.amount # Ensure Mypy knows it's not None
-
         account_node = self.get_or_create_account(posting.account)
-        balance_obj = account_node.get_own_balance(current_amount.commodity)
-
-        if posting.isOpening() and isinstance(balance_obj, AssetBalance):
-            cost = transaction.get_posting_cost(posting)
-            if cost:
-                cost_basis_per_unit = None
-                if cost.kind == CostKind.TotalCost and current_amount.quantity != 0:
-                    cost_basis_per_unit_value = abs(cost.amount.quantity / current_amount.quantity)
-                    cost_basis_per_unit = Amount(cost_basis_per_unit_value, cost.amount.commodity)
-                elif cost.kind == CostKind.UnitCost:
-                    cost_basis_per_unit = cost.amount
-                
-                if cost_basis_per_unit:
-                    lot = Lot(
-                        acquisition_date=str(transaction.date),
-                        quantity=current_amount,
-                        cost_basis_per_unit=cost_basis_per_unit,
-                        original_posting=posting
-                    )
-                    balance_obj.add_lot(lot) # add_lot updates AssetBalance.total_amount
-        elif isinstance(balance_obj, CashBalance):
-            balance_obj.add_posting(posting) # Posting object itself is passed, add_posting handles its amount
-        elif posting.isClosing() and isinstance(balance_obj, AssetBalance):
-            # Just update the quantity for the sale; FIFO will handle lot adjustments.
-            balance_obj.total_amount = Amount(balance_obj.total_amount.quantity + current_amount.quantity, balance_obj.commodity)
         
-        account_node._propagate_total_balance_update(current_amount)
+        commodity_to_use: Optional[Commodity] = None
+        if posting.amount:
+            commodity_to_use = posting.amount.commodity
+        elif posting.balance:
+            commodity_to_use = posting.balance.commodity
+        
+        if not commodity_to_use:
+            return # Should not happen if parser ensures amount or balance
+
+        balance_obj = account_node.get_own_balance(commodity_to_use)
+
+        # Lot creation from balance assertion (e.g., "assets:gold = 10 GOLD @@ 20000 USD")
+        if posting.balance and posting.balance.quantity > 0 and posting.cost and isinstance(balance_obj, AssetBalance):
+            cost_to_use: Optional[Cost] = posting.cost
+            cost_basis_per_unit = None
+            if cost_to_use: # Check if cost_to_use is not None
+                if cost_to_use.kind == CostKind.TotalCost and posting.balance.quantity != 0:
+                    cbpu_val = abs(cost_to_use.amount.quantity / posting.balance.quantity)
+                    cost_basis_per_unit = Amount(cbpu_val, cost_to_use.amount.commodity)
+                elif cost_to_use.kind == CostKind.UnitCost:
+                    cost_basis_per_unit = cost_to_use.amount
+            
+            if cost_basis_per_unit:
+                lot = Lot(str(transaction.date), posting.balance, cost_basis_per_unit, posting)
+                balance_obj.add_lot(lot) # This updates balance_obj.total_amount
+                account_node._propagate_total_balance_update(posting.balance) # Propagate the asserted balance
+
+        # Lot creation from opening transaction posting (positive amount with cost, no balance assertion part)
+        elif posting.isOpening() and posting.amount and isinstance(balance_obj, AssetBalance): 
+            # posting.amount is not None here due to isOpening()
+            opening_cost_to_use: Optional[Cost] = transaction.get_posting_cost(posting) # This might infer cost if not explicit
+            if opening_cost_to_use:
+                cost_basis_per_unit = None
+                if opening_cost_to_use.kind == CostKind.TotalCost and posting.amount.quantity != 0:
+                    cbpu_val = abs(opening_cost_to_use.amount.quantity / posting.amount.quantity)
+                    cost_basis_per_unit = Amount(cbpu_val, opening_cost_to_use.amount.commodity)
+                elif opening_cost_to_use.kind == CostKind.UnitCost:
+                    cost_basis_per_unit = opening_cost_to_use.amount
+
+                if cost_basis_per_unit:
+                    lot = Lot(str(transaction.date), posting.amount, cost_basis_per_unit, posting)
+                    balance_obj.add_lot(lot) # Updates balance_obj.total_amount
+                    account_node._propagate_total_balance_update(posting.amount) # Propagate the posting amount
+        
+        # Regular posting amount effects (cash movements, or asset sales that reduce quantity)
+        elif posting.amount: # This will catch sales and cash postings not covered above
+            if isinstance(balance_obj, CashBalance):
+                balance_obj.add_posting(posting) # Updates CashBalance.total_amount
+            elif isinstance(balance_obj, AssetBalance) and posting.isClosing(): # Sale of an asset
+                # Reduce asset quantity. AssetBalance.total_amount is directly affected.
+                balance_obj.total_amount = Amount(balance_obj.total_amount.quantity + posting.amount.quantity, balance_obj.commodity)
+            
+            # Propagate all other posting amounts that were not part of lot creation via balance assertion or opening.
+            account_node._propagate_total_balance_update(posting.amount)
+
 
     def _apply_gain_loss_to_income_accounts(self, gain_loss_amount: Amount, source_account_name: AccountName, transaction_date: date):
-        """Creates and applies a synthetic posting for the calculated capital gain or loss."""
+        """Placeholder for applying capital gain or loss. Currently does nothing to income/expense accounts."""
         if gain_loss_amount.quantity == 0:
             return
 
-        if gain_loss_amount.quantity > 0:
-            gain_loss_income_expense_account_name = AccountName(["income", "capital_gains"])
-        else:
-            gain_loss_income_expense_account_name = AccountName(["expenses", "capital_losses"])
+        # The following logic for creating synthetic postings and updating income/expense accounts
+        # has been commented out as per the requirement to not add them to the BalanceSheet.
+        # CapitalGainResult objects are still generated and stored elsewhere.
 
-        gain_loss_node = self.get_or_create_account(gain_loss_income_expense_account_name)
+        # if gain_loss_amount.quantity > 0:
+        #     gain_loss_income_expense_account_name = AccountName(["income", "capital_gains"])
+        # else:
+        #     gain_loss_income_expense_account_name = AccountName(["expenses", "capital_losses"])
+
+        # gain_loss_node = self.get_or_create_account(gain_loss_income_expense_account_name)
         
-        synthetic_posting = Posting(
-            account=gain_loss_income_expense_account_name,
-            amount=Amount(gain_loss_amount.quantity, gain_loss_amount.commodity), # Ensure correct sign for income/expense
-            comment=Comment(comment=f"Capital gain/loss from {source_account_name.name} sale on {transaction_date.strftime('%Y-%m-%d')}")
-        )
+        # synthetic_posting = Posting(
+        #     account=gain_loss_income_expense_account_name,
+        #     amount=Amount(-gain_loss_amount.quantity, gain_loss_amount.commodity), 
+        #     comment=Comment(comment=f"Capital gain/loss from {source_account_name.name} sale on {transaction_date.strftime('%Y-%m-%d')}")
+        # )
 
-        if synthetic_posting.amount is None: # Should not happen if gain_loss_amount.quantity != 0
-            raise ValueError("Synthetic posting for gain/loss has no amount.")
+        # if synthetic_posting.amount is None: 
+        #     raise ValueError("Synthetic posting for gain/loss has no amount.")
 
-        current_synthetic_amount: Amount = synthetic_posting.amount
+        # current_synthetic_amount: Amount = synthetic_posting.amount
 
-        synthetic_balance_obj = gain_loss_node.get_own_balance(current_synthetic_amount.commodity)
-        if isinstance(synthetic_balance_obj, CashBalance): # Gains/losses are typically cash-like
-            synthetic_balance_obj.add_posting(synthetic_posting) # Pass the whole posting
-        else:
-            account_details = ""
-            gain_loss_account_node = self.get_account(gain_loss_income_expense_account_name)
-            if gain_loss_account_node:
-                account_details = gain_loss_account_node._format_balances_for_error(current_synthetic_amount.commodity)
+        # # synthetic_balance_obj = gain_loss_node.get_own_balance(current_synthetic_amount.commodity)
+        # if isinstance(synthetic_balance_obj, CashBalance): # Gains/losses are typically cash-like
+        #     synthetic_balance_obj.add_posting(synthetic_posting) # Pass the whole posting
+        # else:
+        #     account_details = ""
+        #     gain_loss_account_node = self.get_account(gain_loss_income_expense_account_name)
+        #     if gain_loss_account_node:
+        #         account_details = gain_loss_account_node._format_balances_for_error(current_synthetic_amount.commodity)
             
-            raise ValueError(
-                f"Gain/loss account {gain_loss_income_expense_account_name.name} is not a CashBalance type for commodity {current_synthetic_amount.commodity.name}. Cannot record gain/loss.\n"
-                f"Account Details ({gain_loss_income_expense_account_name.name}):\n{account_details}"
-            )
+        #     raise ValueError(
+        #         f"Gain/loss account {gain_loss_income_expense_account_name.name} is not a CashBalance type for commodity {current_synthetic_amount.commodity.name}. Cannot record gain/loss.\n"
+        #         f"Account Details ({gain_loss_income_expense_account_name.name}):\n{account_details}"
+        #     )
 
-        gain_loss_node._propagate_total_balance_update(current_synthetic_amount)
+        # gain_loss_node._propagate_total_balance_update(current_synthetic_amount)
 
     def _format_transaction_cash_postings_for_error(self, transaction: Transaction, exclude_posting: Posting) -> str:
         """Formats cash postings in a transaction for error messages, excluding one specific posting."""
@@ -367,7 +395,9 @@ class BalanceSheet:
         cash_proceeds_postings: List[Posting] = []
         for p in transaction.postings:
             if p != sale_posting and p.amount and p.amount.quantity > 0 and \
-               p.amount.commodity != closing_commodity and p.amount.commodity.isCash():
+               p.amount.commodity != closing_commodity and p.amount.commodity.isCash() and \
+               (not p.account.name.startswith("expenses:")) and \
+               (not p.account.name.startswith("income:")): # Exclude expenses and income from proceeds
                 cash_proceeds_postings.append(p)
 
         if not cash_proceeds_postings:
@@ -491,17 +521,32 @@ class BalanceSheet:
         Applies a single transaction to the balance sheet, updating balances, lots, and calculating capital gains.
         This method modifies the BalanceSheet instance it's called on and returns it.
         """
+        if "SOL" in transaction.to_journal_string():
+            print(f"DEBUG: {transaction.to_journal_string()}")
+
         for posting in transaction.postings:
-            if posting.amount is None: # Skip postings without amounts
-                continue
+            # _apply_direct_posting_effects will handle all relevant posting types,
+            # including those with only balance/cost (like balance assertions for lots)
+            # or only amounts (like cash movements or sales).
             self._apply_direct_posting_effects(posting, transaction)
 
-            # Check if this posting is an asset sale to trigger capital gains processing
-            account_node = self.get_or_create_account(posting.account) # Get account node again, or pass from above
-            balance_obj = account_node.get_own_balance(posting.amount.commodity) # Get balance obj again, or pass
+            # Check if this posting is an asset sale to trigger capital gains processing.
+            # This should only happen for postings that represent an actual change in asset quantity (have an amount).
+            if posting.amount is not None: # Ensure posting.amount exists before using it
+                account_node = self.get_or_create_account(posting.account)
+                # Get balance_obj based on posting.amount.commodity for AssetBalance check
+                # Need to ensure that own_balances has this commodity, could be a new commodity for the account
+                if posting.amount.commodity not in account_node.own_balances:
+                    # If the commodity isn't in own_balances yet, get_own_balance will create it.
+                    # This is safe, but the balance_obj might be a new, empty AssetBalance if it's an asset type.
+                    # For isClosing() check, we need an existing AssetBalance with lots.
+                    # However, isClosing() itself doesn't rely on existing lots, just the nature of the posting.
+                     pass # Allow get_own_balance to create if needed, or rely on it being there from _apply_direct_posting_effects
 
-            if posting.isClosing() and isinstance(balance_obj, AssetBalance):
-                self._process_asset_sale_capital_gains(posting, transaction)
+                balance_obj = account_node.get_own_balance(posting.amount.commodity)
+
+                if posting.isClosing() and isinstance(balance_obj, AssetBalance):
+                    self._process_asset_sale_capital_gains(posting, transaction)
         return self
 
     @staticmethod
