@@ -10,18 +10,19 @@ ledger-parsita now aims to provide a dedicated tool for tracking capital gains f
 
 The tool will:
 - Read and parse an hledger journal file.
-- Identify transactions representing the closing of investment positions.
-- Use dated subaccounts (e.g., `assets:broker:tastytrade:MSTR:20240414`) to determine the acquisition date and cost basis of the sold lots.
-- Apply First-In, First-Out (FIFO) logic to match sold lots with acquired lots.
-- Calculate the capital gain or loss for each closed position.
-- Generate new transactions to record the calculated capital gains/losses.
-- Update the original hledger journal file in place with these new transactions.
+- As part of building the balance sheet:
+    - Identify transactions representing the closing of investment positions.
+    - Use dated subaccounts (e.g., `assets:broker:tastytrade:MSTR:20240414`) to determine the acquisition date and cost basis of the sold lots.
+    - Apply First-In, First-Out (FIFO) logic to match sold lots with acquired lots.
+    - Calculate the capital gain or loss for each closed position and store these results.
+- (Future) Generate new transactions to record the calculated capital gains/losses.
+- (Future) Update the original hledger journal file in place with these new transactions.
 
 ## User Experience Goals
 
-- Provide an easy-to-use command-line interface for triggering the capital gains calculation and journal update.
-- Clearly report the calculated capital gains/losses to the user.
-- Ensure the in-place update of the journal file is safe and preserves data integrity.
+- Provide an easy-to-use command-line interface (CLI) with commands like `balance` (for account balances) and `gains` (for capital gains reporting).
+- Clearly report the calculated capital gains/losses to the user via the `gains` command.
+- (Future) Ensure the in-place update of the journal file is safe and preserves data integrity.
 - Allow users to specify which accounts and commodities to track for capital gains.
 - Provide options for handling different scenarios (e.g., wash sales - future consideration).
 - Maintain fast and efficient processing, even for large journal files with many transactions.

@@ -95,6 +95,12 @@ This document outlines the current focus and active considerations for ledger-pa
     - `BalanceSheet.format_account_hierarchy` and `BalanceSheet.format_account_flat` now delegate to the respective methods in the `Account` class.
     - Updated `tests/test_balance_printing.py` to align with these changes, ensuring all tests pass.
 - **Updated `Account.format_hierarchical` in `src/balance.py` to suppress printing of zero-balance commodity lines and to avoid printing account names if the account itself and its children have no non-zero balances to display for the current mode. All tests in `tests/test_balance_printing.py` and subsequently all project tests pass after this change.**
+- **Refactored `Result` handling in `src/main.py` CLI commands to use an early return pattern with `is_successful` from `returns.pipeline`, replacing `match` statements.**
+- **Separated capital gains reporting from the `balance` command into a new `gains` command in `src/main.py`.**
+- **Added `BalanceSheet.from_journal(journal)` static method to `src/balance.py` and updated `balance_cmd` and `gains_cmd` in `src/main.py` to use it.**
+- **Modified capital gains calculation logic in `src/balance.py` to raise `ValueError` for conditions that were previously warnings (e.g., insufficient lots, mismatched commodities, no proceeds).**
+- **Updated `src/main.py` to catch these `ValueErrors` in `balance_cmd` and `gains_cmd`.**
+- **Updated tests in `tests/test_balance_complex.py`, `tests/test_capital_gains_fifo.py`, and `tests/test_main.py` to expect `ValueErrors` or appropriate CLI error exits for these fatal conditions. All 143 tests pass.**
 
 ## Next Steps
 

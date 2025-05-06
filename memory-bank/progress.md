@@ -50,6 +50,12 @@ This document tracks the progress, completed features, and remaining tasks for l
 - **Moved balance printing helper functions (`format_account_hierarchy`, `format_account_flat`) from `src/main.py` to be methods of the `BalanceSheet` class in `src/balance.py` and removed leading underscores from their names.**
 - **Refactored balance printing logic by moving formatting methods (`format_hierarchical`, `format_flat_lines`) into the `Account` class in `src/balance.py`, making `Account.format_hierarchical` recursive. `BalanceSheet` methods now delegate to `Account` methods.**
 - **Updated `Account.format_hierarchical` to suppress zero-balance commodity lines and account names if no non-zero balances are present for the account or its children in the current display mode. All project tests pass after this change.**
+- **Refactored `Result` handling in `src/main.py` CLI commands to use an early return pattern with `is_successful` from `returns.pipeline`.**
+- **Separated capital gains reporting: removed from `balance` command and added a new `gains` command in `src/main.py`.**
+- **Added `BalanceSheet.from_journal(journal)` static method to `src/balance.py` and updated `src/main.py` to use it.**
+- **Made capital gains calculation warnings in `src/balance.py` fatal by raising `ValueError` exceptions.**
+- **Updated `src/main.py` to catch these `ValueErrors` in `balance_cmd` and `gains_cmd`.**
+- **Updated relevant tests to expect `ValueErrors` or appropriate CLI error exits. All 143 tests pass.**
 
 ## What's Left to Build
 

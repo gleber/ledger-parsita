@@ -83,6 +83,9 @@ def test_cli_balance_command_taxes_journal():
 
     # Assert that the command exited successfully (return code 0)
     assert result.returncode == 0
+    # No error is expected now for this file with the balance command.
+    # If specific output needs to be checked, it can be added here.
+    # For now, just ensuring it runs without error is sufficient for this test's original intent.
 
 def test_cli_print_command_flat():
     main_journal_path = TEST_INCLUDES_DIR / "main.journal"

@@ -13,7 +13,7 @@ from src.filtering import BaseFilter, parse_query
 from returns.result import Result, Success, Failure
 from src.capital_gains import find_open_transactions, find_close_transactions
 from src.balance import BalanceSheet, Account # Import BalanceSheet and Account
-from returns.pipeline import (flow)
+from returns.pipeline import flow, is_successful # Import is_successful
 from returns.pointfree import (bind)
 from src.filtering import Filters, FILTER_LIST # Import Filters and FILTER_LIST
 
@@ -43,13 +43,14 @@ def pprint_cmd(filename: Path, flat: bool, strip: bool, query: Optional[Filters]
         str(filename.absolute()), flat=flat, strip=strip, query=query
     )
 
-    match result:
-        case Success(journal):
-            pprint.pprint(journal, indent=2)
-            exit(0)
-        case Failure(error):
-            print(f"Error: {error}")
-            exit(1)
+    if not is_successful(result):
+        error_content = result.failure()
+        click.echo(f"Error: {error_content}", err=True)
+        exit(1)
+    
+    journal: Journal = result.unwrap()
+    pprint.pprint(journal, indent=2)
+    exit(0)
 
 
 # Define the print command
@@ -72,13 +73,14 @@ def print_cmd(filename: Path, flat: bool, strip: bool, query: Optional[Filters])
         str(filename.absolute()), flat=flat, strip=strip, query=query
     )
 
-    match result:
-        case Success(processed_journal):
-            print(processed_journal.to_journal_string())
-            exit(0)
-        case Failure(error):
-            print(f"Error processing journal: {error}")
-            exit(1)
+    if not is_successful(result):
+        error_content = result.failure()
+        click.echo(f"Error processing journal: {error_content}", err=True)
+        exit(1)
+
+    processed_journal: Journal = result.unwrap()
+    click.echo(processed_journal.to_journal_string())
+    exit(0)
 
 
 def is_opening_position(posting: Posting) -> bool:
@@ -148,13 +150,13 @@ def find_positions_cmd(filename: Path):
         str(filename.absolute()), flat=True, strip=False, query=None
     )
 
-    match result:
-        case Failure(error):
-            print(f"Error parsing journal file: {error}")
-            exit(1)
-        case Success(journal):
-            parsed_data: Journal = journal
-            click.echo(f"Successfully parsed hledger journal: {filename}", err=True)
+    if not is_successful(result):
+        error_content = result.failure()
+        click.echo(f"Error parsing journal file: {error_content}", err=True)
+        exit(1)
+    
+    parsed_data: Journal = result.unwrap()
+    click.echo(f"Successfully parsed hledger journal: {filename}", err=True)
 
     open_txns = find_open_transactions(parsed_data)
     close_txns = find_close_transactions(parsed_data)
@@ -201,48 +203,76 @@ def balance_cmd(filename: Path, query: Optional[Filters], flat: bool, display: s
         str(filename.absolute()), flat=True, strip=False, query=query
     )
 
-    match result:
-        case Failure(error):
-            print(f"Error parsing journal file: {error}")
-            exit(1)
-        case Success(journal):
-            # Extract only Transaction objects from the flattened entries (already flattened by parse_from_file)
-            transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-            balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    if not is_successful(result):
+        error_content = result.failure()
+        click.echo(f"Error parsing journal file: {error_content}", err=True)
+        exit(1)
 
-            click.echo("Current Balances:")
-            if flat:
-                for line in balance_sheet.format_account_flat(display=display): # Use BalanceSheet method
-                    click.echo(line)
-            else:
-                # The BalanceSheet.format_account_hierarchy method now handles iterating through its root accounts.
-                for line in balance_sheet.format_account_hierarchy(display=display): 
-                    click.echo(line)
+    journal: Journal = result.unwrap()
+    try:
+        balance_sheet = BalanceSheet.from_journal(journal) # Use new method
+    except ValueError as e:
+        click.echo(f"Error calculating balance sheet: {e}", err=True)
+        exit(1)
 
-            # Print Capital Gains Results from the BalanceSheet object
-            click.echo("\nCapital Gains Results:")
-            if balance_sheet.capital_gains_realized:
-                for gain_result in balance_sheet.capital_gains_realized:
-                    closing_date_str = gain_result.closing_date.strftime('%Y-%m-%d') if gain_result.closing_date else 'N/A'
-                    acquisition_date_str = gain_result.acquisition_date.strftime('%Y-%m-%d') if gain_result.acquisition_date else 'N/A'
-
-                    closing_account = gain_result.closing_posting.account.name if gain_result.closing_posting.account else 'N/A'
-                    closing_commodity = gain_result.matched_quantity.commodity.name if gain_result.matched_quantity.commodity else 'N/A'
-                    matched_quantity = gain_result.matched_quantity.quantity
-                    cost_basis = gain_result.cost_basis.quantity
-                    proceeds = gain_result.proceeds.quantity
-                    gain_loss = gain_result.gain_loss.quantity
-                    gain_loss_commodity = gain_result.gain_loss.commodity.name if gain_result.gain_loss.commodity else 'N/A'
-
-                    click.echo(f"  Sale Date: {closing_date_str}, Account: {closing_account}, Commodity: {closing_commodity}, Quantity: {matched_quantity}")
-                    click.echo(f"    Acquisition Date: {acquisition_date_str}, Cost Basis: {cost_basis}, Proceeds: {proceeds}, Gain/Loss: {gain_loss} {gain_loss_commodity}")
-            else:
-                click.echo("  No capital gains or losses calculated.")
+    click.echo("Current Balances:")
+    if flat:
+        for line in balance_sheet.format_account_flat(display=display): # Use BalanceSheet method
+            click.echo(line)
+    else:
+        # The BalanceSheet.format_account_hierarchy method now handles iterating through its root accounts.
+        for line in balance_sheet.format_account_hierarchy(display=display): 
+            click.echo(line)
 
     exit(0)
 
-# Removed _format_account_hierarchy and _format_account_flat as they are now methods of BalanceSheet
-# Removed "from typing import Generator" as it's no longer needed here
+# Define the gains command
+@cli.command("gains")
+@click.argument(
+    "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
+)
+@click.option(
+    "-q", "--query", type=FILTER_LIST, default=None, help="Filter transactions using a query string."
+)
+def gains_cmd(filename: Path, query: Optional[Filters]):
+    """Calculates and prints only the capital gains results."""
+    result: Result[Journal, Union[ParseError, str, ValueError]] = Journal.parse_from_file(
+        str(filename.absolute()), flat=True, strip=False, query=query
+    )
+
+    if not is_successful(result):
+        error_content = result.failure()
+        click.echo(f"Error parsing journal file: {error_content}", err=True)
+        exit(1)
+
+    journal: Journal = result.unwrap()
+    try:
+        balance_sheet = BalanceSheet.from_journal(journal) # Use new method
+    except ValueError as e:
+        click.echo(f"Error calculating capital gains: {e}", err=True)
+        exit(1)
+
+    click.echo("Capital Gains Results:")
+    if balance_sheet.capital_gains_realized:
+        for gain_result in balance_sheet.capital_gains_realized:
+            closing_date_str = gain_result.closing_date.strftime('%Y-%m-%d') if gain_result.closing_date else 'N/A'
+            acquisition_date_str = gain_result.acquisition_date.strftime('%Y-%m-%d') if gain_result.acquisition_date else 'N/A'
+
+            closing_account = gain_result.closing_posting.account.name if gain_result.closing_posting.account else 'N/A'
+            closing_commodity = gain_result.matched_quantity.commodity.name if gain_result.matched_quantity.commodity else 'N/A'
+            matched_quantity = gain_result.matched_quantity.quantity
+            cost_basis = gain_result.cost_basis.quantity
+            proceeds = gain_result.proceeds.quantity
+            gain_loss = gain_result.gain_loss.quantity
+            gain_loss_commodity = gain_result.gain_loss.commodity.name if gain_result.gain_loss.commodity else 'N/A'
+
+            click.echo(f"  Sale Date: {closing_date_str}, Account: {closing_account}, Commodity: {closing_commodity}, Quantity: {matched_quantity}")
+            click.echo(f"    Acquisition Date: {acquisition_date_str}, Cost Basis: {cost_basis}, Proceeds: {proceeds}, Gain/Loss: {gain_loss} {gain_loss_commodity}")
+    else:
+        click.echo("  No capital gains or losses calculated.")
+
+    exit(0)
+
 
 if __name__ == "__main__":
     cli()

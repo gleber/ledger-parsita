@@ -40,6 +40,7 @@ def test_calculate_balances_and_lots_simple_capital_gain():
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
+    assert income_account is not None, "Income account not found"
     income_balance = income_account.get_own_balance(Commodity("USD"))
     assert isinstance(income_balance, CashBalance)
     # Expected gain: (1000 proceeds / 5 quantity sold) * 5 matched quantity - (1500 cost basis / 10 quantity acquired) * 5 matched quantity
@@ -49,6 +50,7 @@ def test_calculate_balances_and_lots_simple_capital_gain():
 
     # Verify the remaining quantity of the lot
     aapl_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    assert aapl_account is not None, "AAPL lot 1 account not found"
     aapl_balance = aapl_account.get_own_balance(Commodity("AAPL"))
     assert isinstance(aapl_balance, AssetBalance)
     assert len(aapl_balance.lots) == 1
@@ -78,6 +80,7 @@ def test_calculate_balances_and_lots_multiple_opens_single_close():
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
+    assert income_account is not None, "Income account not found"
     income_balance = income_account.get_own_balance(Commodity("USD"))
     assert isinstance(income_balance, CashBalance)
     # Expected gain:
@@ -89,12 +92,14 @@ def test_calculate_balances_and_lots_multiple_opens_single_close():
 
     # Verify the remaining quantity of the lots
     aapl_account_lot1 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    assert aapl_account_lot1 is not None, "AAPL lot 1 account not found"
     aapl_balance_lot1 = aapl_account_lot1.get_own_balance(Commodity("AAPL"))
     assert isinstance(aapl_balance_lot1, AssetBalance)
     assert len(aapl_balance_lot1.lots) == 1
     assert aapl_balance_lot1.lots[0].remaining_quantity == Decimal("0") # 10 initial - 10 matched
 
     aapl_account_lot2 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230105"]))
+    assert aapl_account_lot2 is not None, "AAPL lot 2 account not found"
     aapl_balance_lot2 = aapl_account_lot2.get_own_balance(Commodity("AAPL"))
     assert isinstance(aapl_balance_lot2, AssetBalance)
     assert len(aapl_balance_lot2.lots) == 1
@@ -124,6 +129,7 @@ def test_calculate_balances_and_lots_single_open_multiple_closes():
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
+    assert income_account is not None, "Income account not found"
     income_balance = income_account.get_own_balance(Commodity("USD"))
     assert isinstance(income_balance, CashBalance)
     # Expected total gain:
@@ -137,6 +143,7 @@ def test_calculate_balances_and_lots_single_open_multiple_closes():
 
     # Verify the remaining quantity of the lot
     aapl_account_lot1 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    assert aapl_account_lot1 is not None, "AAPL lot 1 account not found"
     aapl_balance_lot1 = aapl_account_lot1.get_own_balance(Commodity("AAPL"))
     assert isinstance(aapl_balance_lot1, AssetBalance)
     assert len(aapl_balance_lot1.lots) == 1
@@ -171,6 +178,7 @@ def test_calculate_balances_and_lots_multiple_assets():
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
+    assert income_account is not None, "Income account not found"
     income_balance = income_account.get_own_balance(Commodity("USD"))
     assert isinstance(income_balance, CashBalance)
     # Expected total gain:
@@ -182,12 +190,14 @@ def test_calculate_balances_and_lots_multiple_assets():
 
     # Verify remaining quantities
     aapl_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    assert aapl_account is not None, "AAPL account not found"
     aapl_balance = aapl_account.get_own_balance(Commodity("AAPL"))
     assert isinstance(aapl_balance, AssetBalance)
     assert len(aapl_balance.lots) == 1
     assert aapl_balance.lots[0].remaining_quantity == Decimal("5") # 10 initial - 5 sold
 
     msft_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "MSFT", "20230102"]))
+    assert msft_account is not None, "MSFT account not found"
     msft_balance = msft_account.get_own_balance(Commodity("MSFT"))
     assert isinstance(msft_balance, AssetBalance)
     assert len(msft_balance.lots) == 1
@@ -219,6 +229,7 @@ def test_calculate_balances_and_lots_excludes_non_asset_closing_postings():
 
     # Verify remaining quantity of the lot (should be unchanged)
     aapl_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    assert aapl_account is not None, "AAPL account not found"
     aapl_balance = aapl_account.get_own_balance(Commodity("AAPL"))
     assert isinstance(aapl_balance, AssetBalance)
     assert len(aapl_balance.lots) == 1
@@ -243,6 +254,7 @@ def test_calculate_balances_and_lots_handles_undated_open_accounts():
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
+    assert income_account is not None, "Income account not found"
     income_balance = income_account.get_own_balance(Commodity("USD"))
     assert isinstance(income_balance, CashBalance)
     # Expected gain: (20000 proceeds / Decimal("0.5") quantity sold) * Decimal("0.5") matched quantity - (30000 cost basis / 1 quantity acquired) * Decimal("0.5") matched quantity
@@ -252,6 +264,7 @@ def test_calculate_balances_and_lots_handles_undated_open_accounts():
 
     # Verify the remaining quantity of the lot
     btc_account = balance_sheet.get_account(AccountName(parts=["assets", "crypto", "BTC", "20230101"]))
+    assert btc_account is not None, "BTC account not found"
     btc_balance = btc_account.get_own_balance(Commodity("BTC"))
     assert isinstance(btc_balance, AssetBalance)
     assert len(btc_balance.lots) == 1
@@ -276,6 +289,7 @@ def test_calculate_balances_and_lots_partial_match_gain():
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
+    assert income_account is not None, "Income account not found"
     income_balance = income_account.get_own_balance(Commodity("USD"))
     assert isinstance(income_balance, CashBalance)
     # Expected gain: (600 proceeds / 4 quantity sold) * 4 matched quantity - (1000 cost basis / 10 quantity acquired) * 4 matched quantity
@@ -285,6 +299,7 @@ def test_calculate_balances_and_lots_partial_match_gain():
 
     # Verify the remaining quantity of the lot
     xyz_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
+    assert xyz_account is not None, "XYZ account not found"
     xyz_balance = xyz_account.get_own_balance(Commodity("XYZ"))
     assert isinstance(xyz_balance, AssetBalance)
     assert len(xyz_balance.lots) == 1
@@ -310,6 +325,7 @@ def test_calculate_balances_and_lots_multiple_postings_same_commodity():
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
+    assert income_account is not None, "Income account not found"
     income_balance = income_account.get_own_balance(Commodity("USD"))
     assert isinstance(income_balance, CashBalance)
     # Expected gain: (800 proceeds / 5 quantity sold) * 5 matched quantity - (1000 cost basis / 10 quantity acquired) * 5 matched quantity
@@ -321,11 +337,13 @@ def test_calculate_balances_and_lots_multiple_postings_same_commodity():
     # (170 per unit) * 5 - 500 = 850 - 500 = 350
     # The current logic seems to be calculating proceeds based on the total cash received in the transaction, not just from the sale.
     # This might be a point for refinement, but for now, let's assert based on the current implementation's behavior.
-    assert income_balance.total_amount.quantity == Decimal("350")
+    # With stricter proceeds check, only assets:cash is considered.
+    assert income_balance.total_amount.quantity == Decimal("300") # Corrected: 800 (cash) - 500 (cost)
     assert income_balance.total_amount.commodity.name == "USD"
 
     # Verify the remaining quantity of the lot
     xyz_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
+    assert xyz_account is not None, "XYZ account not found"
     xyz_balance = xyz_account.get_own_balance(Commodity("XYZ"))
     assert isinstance(xyz_balance, AssetBalance)
     assert len(xyz_balance.lots) == 1
@@ -351,6 +369,7 @@ def test_calculate_balances_and_lots_multiple_cash_postings():
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
+    assert income_account is not None, "Income account not found"
     income_balance = income_account.get_own_balance(Commodity("USD"))
     assert isinstance(income_balance, CashBalance)
     # Expected gain: (400 + 450 proceeds / 5 quantity sold) * 5 matched quantity - (1000 cost basis / 10 quantity acquired) * 5 matched quantity
@@ -361,6 +380,7 @@ def test_calculate_balances_and_lots_multiple_cash_postings():
 
     # Verify the remaining quantity of the lot
     xyz_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
+    assert xyz_account is not None, "XYZ account not found"
     xyz_balance = xyz_account.get_own_balance(Commodity("XYZ"))
     assert isinstance(xyz_balance, AssetBalance)
     assert len(xyz_balance.lots) == 1
@@ -381,23 +401,18 @@ def test_calculate_balances_and_lots_insufficient_lots():
 """
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
-
-    # Verify the balance of the income:capital-gains account
-    income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
-    income_balance = income_account.get_own_balance(Commodity("USD"))
-    assert isinstance(income_balance, CashBalance)
-    # Expected gain (based on matched quantity): (1500 proceeds / 10 quantity sold) * 5 matched quantity - (500 cost basis / 5 quantity acquired) * 5 matched quantity
-    # (150 per unit) * 5 - (100 per unit) * 5 = 750 - 500 = 250
-    assert income_balance.total_amount.quantity == Decimal("250")
-    assert income_balance.total_amount.commodity.name == "USD"
-
-    # Verify the remaining quantity of the lot
-    xyz_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
-    xyz_balance = xyz_account.get_own_balance(Commodity("XYZ"))
-    assert isinstance(xyz_balance, AssetBalance)
-    assert len(xyz_balance.lots) == 1
-    assert xyz_balance.lots[0].remaining_quantity == Decimal("0") # 5 initial - 5 matched
+    
+    with pytest.raises(ValueError) as excinfo:
+        BalanceSheet.from_transactions(transactions_only) # Updated function call
+    
+    error_str = str(excinfo.value)
+    assert "Not enough open lots found" in error_str
+    assert "Remaining to match: 5" in error_str
+    assert "Account Details (assets:stocks:XYZ for XYZ):" in error_str
+    assert "Own: -10 XYZ" in error_str # Corrected assertion
+    assert "Total: -5 XYZ" in error_str # Corrected assertion
+    assert "Available Lots Considered:" in error_str
+    assert "Acq. Date: 2023-01-01, Orig. Qty: 5 XYZ, Rem. Qty: 0, Cost/Unit: 100 USD" in error_str # Corrected Rem. Qty and formatting
 
 
 def test_calculate_balances_and_lots_complex_fifo():
@@ -438,6 +453,7 @@ def test_calculate_balances_and_lots_complex_fifo():
 
     # Verify the balance of the income:capital-gains account
     income_account = balance_sheet.get_account(AccountName(parts=["income", "capital_gains"]))
+    assert income_account is not None, "Income account not found"
     income_balance = income_account.get_own_balance(Commodity("USD"))
     assert isinstance(income_balance, CashBalance)
     # Expected total gain:
@@ -458,18 +474,21 @@ def test_calculate_balances_and_lots_complex_fifo():
 
     # Verify remaining quantities
     abc_account_lot1 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230101"]))
+    assert abc_account_lot1 is not None, "ABC lot 1 account not found"
     abc_balance_lot1 = abc_account_lot1.get_own_balance(Commodity("ABC"))
     assert isinstance(abc_balance_lot1, AssetBalance)
     assert len(abc_balance_lot1.lots) == 1
     assert abc_balance_lot1.lots[0].remaining_quantity == Decimal("0") # 10 initial - 8 sold - 2 sold
 
     abc_account_lot2 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230105"]))
+    assert abc_account_lot2 is not None, "ABC lot 2 account not found"
     abc_balance_lot2 = abc_account_lot2.get_own_balance(Commodity("ABC"))
     assert isinstance(abc_balance_lot2, AssetBalance)
     assert len(abc_balance_lot2.lots) == 1
     assert abc_balance_lot2.lots[0].remaining_quantity == Decimal("0") # 15 initial - 8 sold - 7 sold
 
     abc_account_lot3 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230110"]))
+    assert abc_account_lot3 is not None, "ABC lot 3 account not found"
     abc_balance_lot3 = abc_account_lot3.get_own_balance(Commodity("ABC"))
     assert isinstance(abc_balance_lot3, AssetBalance)
     assert len(abc_balance_lot3.lots) == 1
