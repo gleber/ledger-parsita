@@ -4,7 +4,7 @@ from src.classes import (
     AccountName, Commodity, Amount, Cost, CostKind, Posting, Transaction,
     MissingDateError, MissingDescriptionError, InsufficientPostingsError, InvalidPostingError,
     ImbalanceError, AmbiguousElidedAmountError, UnresolvedElidedAmountError,
-    NoCommoditiesElidedError, MultipleCommoditiesRemainingError
+    NoCommoditiesElidedError, MultipleCommoditiesRemainingError, Journal, JournalEntry
 )
 from returns.result import Success, Failure # Import Success and Failure
 import pytest
@@ -511,3 +511,56 @@ def test_transaction_is_balanced_elided_posting_invalid_amount_in_other():
     balance_result = transaction.is_balanced()
     assert isinstance(balance_result, Failure)
     assert isinstance(balance_result.failure(), InvalidPostingError)
+
+def test_journal_balance_successful_balancing():
+    # Test case where all transactions balance successfully
+    journal = Journal(entries=[
+        JournalEntry(transaction=Transaction(
+            date=date(2023, 1, 1),
+            payee="Balanced Transaction 1",
+            postings=[
+                Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("100"), Commodity("USD"))),
+                Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            ]
+        )),
+        JournalEntry(transaction=Transaction(
+            date=date(2023, 1, 2),
+            payee="Balanced Transaction 2",
+            postings=[
+                Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("50"), Commodity("EUR"))),
+                Posting(account=AccountName(["expenses", "drink"]), amount=Amount(Decimal("-50"), Commodity("EUR"))),
+            ]
+        )),
+    ])
+    result = journal.balance()
+    assert isinstance(result, Success)
+    balanced_journal = result.unwrap()
+    assert len(balanced_journal.entries) == 2
+    for entry in balanced_journal.entries:
+        assert isinstance(entry.transaction.is_balanced(), Success)
+
+def test_journal_balance_failure_on_single_transaction():
+    # Test case where one transaction fails to balance, causing the entire journal balancing to fail
+    journal = Journal(entries=[
+        JournalEntry(transaction=Transaction(
+            date=date(2023, 1, 1),
+            payee="Balanced Transaction",
+            postings=[
+                Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("100"), Commodity("USD"))),
+                Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            ]
+        )),
+        JournalEntry(transaction=Transaction(
+            date=date(2023, 1, 2),
+            payee="Imbalanced Transaction",
+            postings=[
+                Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("50"), Commodity("EUR"))),
+                Posting(account=AccountName(["expenses", "drink"]), amount=Amount(Decimal("-40"), Commodity("EUR"))),
+            ]
+        )),
+    ])
+    result = journal.balance()
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), ImbalanceError)
+    assert result.failure().commodity == Commodity("EUR")
+    assert result.failure().balance_sum == Decimal("10")
