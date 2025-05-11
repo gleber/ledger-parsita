@@ -57,8 +57,15 @@ This document tracks the progress, completed features, and remaining tasks for l
 - **Updated `src/main.py` to catch these `ValueErrors` in `balance_cmd` and `gains_cmd`.**
 - **Updated relevant tests to expect `ValueErrors` or appropriate CLI error exits. All 143 tests pass.**
 - **Fixed RSU-style income test (`test_capital_gains_rsu_style_income_then_sale`) by modifying `Transaction.get_posting_cost` in `src/classes.py` to infer a $0 cost basis for assets acquired via income postings without explicit pricing.**
-- **Fixed `test_crypto_transfer_no_cash_proceeds` and `test_calculate_balances_and_lots_multiple_postings_same_commodity` by updating `BalanceSheet._process_asset_sale_capital_gains` in `src/balance.py` to exclude `expenses:` and `income:` accounts when identifying cash proceeds.**
-- **Corrected assertions in `tests/test_main.py::test_cli_balance_command_taxes_journal` to expect an exit code of 1 and the error message "No lots found" in stderr, reflecting the actual behavior for the `examples/taxes/all.journal` file. All tests now pass.**
+    - **Fixed `test_crypto_transfer_no_cash_proceeds` and `test_calculate_balances_and_lots_multiple_postings_same_commodity` by updating `BalanceSheet._process_asset_sale_capital_gains` in `src/balance.py` to exclude `expenses:` and `income:` accounts when identifying cash proceeds.**
+    - **Corrected assertions in `tests/test_main.py::test_cli_balance_command_taxes_journal` to expect an exit code of 1 and the error message "No lots found" in stderr, reflecting the actual behavior for the `examples/taxes/all.journal` file. All tests now pass.**
+    - **Improved `ValueError` message in `src/balance.py` for sales with no lots, guiding users to check for missing cost bases in opening balance assertions. Updated `tests/test_capital_gains.py` accordingly.**
+- **Refactored `BalanceSheet` internal methods in `src/balance.py` for clarity:**
+    - `_get_consolidated_proceeds` (static method) now handles identification and consolidation of cash proceeds for a sale.
+    - `_perform_fifo_matching_and_gains` (static method) now handles the core FIFO logic, lot quantity updates, and `CapitalGainResult` creation.
+    - `Lot.try_create_from_posting` (static method on `Lot` class) now encapsulates logic for creating `Lot` objects from postings.
+    - `_process_asset_sale_capital_gains` and `_apply_direct_posting_effects` were updated to delegate to these new static helper methods.
+    - All 144 tests pass after these changes.
 
 ## What's Left to Build
 
@@ -100,4 +107,5 @@ This document tracks the progress, completed features, and remaining tasks for l
 - **Decided that each test file must contain at most 500 lines of code to improve maintainability.**
 - **Decided to store detailed `CapitalGainResult` objects within the `BalanceSheet` for potential future use (e.g., journal updates).**
 - **Cost basis inference in `Transaction.get_posting_cost` now handles RSU-style income by assigning a $0 cost basis.**
-- **Proceeds identification in `BalanceSheet._process_asset_sale_capital_gains` now excludes `expenses:` and `income:` accounts.**
+- **Proceeds identification in `BalanceSheet._get_consolidated_proceeds` (previously in `_process_asset_sale_capital_gains`) now excludes `expenses:` and `income:` accounts.**
+- **Lot creation logic is now encapsulated in `Lot.try_create_from_posting`.**

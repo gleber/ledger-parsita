@@ -154,6 +154,9 @@ def test_capital_gains_opening_balance_without_cost_then_partial_sell():
   assets:broker:tastytrade  -25 SOL @ 105.30 USD
 """
     journal = Journal.parse_from_content(journal_string, Path("test_opening_balance_sell.journal")).unwrap().strip_loc()
-    balance_sheet = BalanceSheet.from_journal(journal)
+    with pytest.raises(ValueError) as excinfo:
+        BalanceSheet.from_journal(journal)
 
-    assert len(balance_sheet.capital_gains_realized) == 1
+    assert "No lots found for assets:broker:tastytrade:SOL to match sale" in str(excinfo.value)
+    assert "Possible reason: The initial balance for SOL in this account might have been asserted without a cost basis" in str(excinfo.value)
+    assert "Please ensure all opening balances for assets include a cost basis using '@@' (total cost) or '@' (per-unit cost)" in str(excinfo.value)

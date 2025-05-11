@@ -102,8 +102,15 @@ This document outlines the current focus and active considerations for ledger-pa
 - **Updated `src/main.py` to catch these `ValueErrors` in `balance_cmd` and `gains_cmd`.**
 - **Updated tests in `tests/test_balance_complex.py`, `tests/test_capital_gains_fifo.py`, and `tests/test_main.py` to expect `ValueErrors` or appropriate CLI error exits for these fatal conditions. All 143 tests pass.**
 - **Fixed RSU-style income test (`test_capital_gains_rsu_style_income_then_sale`) by modifying `Transaction.get_posting_cost` in `src/classes.py` to infer a $0 cost basis for assets acquired via income postings without explicit pricing.**
-- **Fixed `test_crypto_transfer_no_cash_proceeds` and `test_calculate_balances_and_lots_multiple_postings_same_commodity` by updating `BalanceSheet._process_asset_sale_capital_gains` in `src/balance.py` to exclude `expenses:` and `income:` accounts when identifying cash proceeds.**
-- **Corrected assertions in `tests/test_main.py::test_cli_balance_command_taxes_journal` to expect an exit code of 1 and the error message "No lots found" in stderr, reflecting the actual behavior for the `examples/taxes/all.journal` file.**
+    - **Fixed `test_crypto_transfer_no_cash_proceeds` and `test_calculate_balances_and_lots_multiple_postings_same_commodity` by updating `BalanceSheet._process_asset_sale_capital_gains` in `src/balance.py` to exclude `expenses:` and `income:` accounts when identifying cash proceeds.**
+    - **Corrected assertions in `tests/test_main.py::test_cli_balance_command_taxes_journal` to expect an exit code of 1 and the error message "No lots found" in stderr, reflecting the actual behavior for the `examples/taxes/all.journal` file.**
+    - **Improved error message in `src/balance.py` for `ValueError` when no lots are found for a sale, guiding users to check for missing cost bases in opening balance assertions. Updated `tests/test_capital_gains.py::test_capital_gains_opening_balance_without_cost_then_partial_sell` to assert the new error message.**
+- **Refactored `BalanceSheet` methods in `src/balance.py` for improved readability and maintainability:**
+    - Extracted proceeds consolidation logic into `BalanceSheet._get_consolidated_proceeds`.
+    - Extracted FIFO matching and capital gains calculation into `BalanceSheet._perform_fifo_matching_and_gains`.
+    - Extracted lot creation logic into `Lot.try_create_from_posting`.
+    - Updated `BalanceSheet._process_asset_sale_capital_gains` and `BalanceSheet._apply_direct_posting_effects` to use these new helper methods.
+    - All tests (144 passed, 1 skipped) pass after these refactorings.
 
 ## Next Steps
 

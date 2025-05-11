@@ -22,11 +22,19 @@ This document describes the system architecture and key design patterns used in 
 ## Design Patterns
 
 - **Parser Pattern:** A dedicated component (`src/hledger_parser.py`) for parsing the hledger journal format into `Journal` objects.
-- **Balance Sheet Builder Pattern:** The `BalanceSheet` class in `src/balance.py` (with static methods `from_journal` and `from_transactions`, and instance method `apply_transaction`) processes a `Journal` chronologically. The `apply_transaction` method, refactored for clarity using helper methods (`_apply_direct_posting_effects`, `_process_asset_sale_capital_gains`, `_apply_gain_loss_to_income_accounts`), is responsible for:
-    - Calculating running balances for all accounts by updating `Account.own_balances` and `Account.total_balances`.
-    - Identifying asset lots (`Lot` objects) with their cost basis upon acquisition and adding them to `AssetBalance.lots`.
-    - **Incrementally calculating capital gains/losses upon encountering closing postings (sales):**
-        - Performing FIFO matching against available lots tracked within the account structure.
+- **Balance Sheet Builder Pattern:** The `BalanceSheet` class in `src/balance.py` (with static methods `from_journal` and `from_transactions`, and instance method `apply_transaction`) processes a `Journal` chronologically.
+    - The `apply_transaction` method calls `_apply_direct_posting_effects` and `_process_asset_sale_capital_gains`.
+    - `_apply_direct_posting_effects`:
+        - Updates own balances.
+        - Creates `Lot` objects for acquisitions by calling the static `Lot.try_create_from_posting` method. This method encapsulates the logic for identifying lot creation scenarios (balance assertions with cost, opening postings with cost) and calculating cost basis per unit.
+    - `_process_asset_sale_capital_gains`:
+        - Consolidates proceeds by calling the static helper `BalanceSheet._get_consolidated_proceeds`.
+        - Performs FIFO matching and calculates gains/losses by calling the static helper `BalanceSheet._perform_fifo_matching_and_gains`. This helper updates `Lot.remaining_quantity` and returns `CapitalGainResult` objects.
+    - Overall responsibilities include:
+        - Calculating running balances for all accounts by updating `Account.own_balances` and `Account.total_balances`.
+        - Identifying asset lots (`Lot` objects) with their cost basis upon acquisition (via `Lot.try_create_from_posting`) and adding them to `AssetBalance.lots`.
+        - **Incrementally calculating capital gains/losses upon encountering closing postings (sales):**
+            - Performing FIFO matching against available lots (delegated to `_perform_fifo_matching_and_gains`).
         - Calculating cost basis, proceeds, and gain/loss for matched portions.
         - Updating the `remaining_quantity` of matched `Lot` objects.
         - **Applying the calculated gain/loss by creating synthetic postings to the appropriate income/expense accounts, which in turn updates their balances.**
@@ -45,10 +53,10 @@ This document describes the system architecture and key design patterns used in 
 
 - The **Parser** reads the journal file(s) and produces a `Journal` object containing `Transaction` and other entries.
 - The `Journal` object is processed by `BalanceSheet.from_journal` (which internally uses `BalanceSheet.from_transactions` that iteratively calls `BalanceSheet.apply_transaction`).
-- The `BalanceSheet.apply_transaction` method (and its helpers):
-    - Identifies opening postings to create and track `Lot` objects.
-    - Upon encountering closing postings, performs FIFO matching, calculates gains/losses, updates lot quantities, and creates synthetic postings to update income/expense account balances. It also stores detailed `CapitalGainResult` objects.
-- The final `BalanceSheet` produced contains all account balances (reflecting all transactions, including synthetic ones for capital gains/losses) **and a list of detailed `CapitalGainResult` objects.**
+- The `BalanceSheet.apply_transaction` method:
+    - Calls `_apply_direct_posting_effects` which uses `Lot.try_create_from_posting` to identify and create `Lot` objects.
+    - Calls `_process_asset_sale_capital_gains` upon encountering closing postings. This method, in turn, uses `_get_consolidated_proceeds` and `_perform_fifo_matching_and_gains` to perform FIFO matching, calculate gains/losses, update lot quantities, and generate `CapitalGainResult` objects.
+- The final `BalanceSheet` produced contains all account balances **and a list of detailed `CapitalGainResult` objects.**
 - The **CLI** (`src/main.py`):
     - Uses a custom `click.ParamType` to parse filter strings.
     - Calls `Journal.parse_from_file` to get a `Journal` object (or a `Failure`).

@@ -384,3 +384,4 @@ def test_calculate_balances_and_lots_handles_undated_open_accounts():
     assert isinstance(btc_balance, AssetBalance)
     assert len(btc_balance.lots) == 1
     assert btc_balance.lots[0].remaining_quantity == Decimal("0.5") # 1 initial - 0.5 sold
+

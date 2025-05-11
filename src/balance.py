@@ -20,6 +20,43 @@ class Lot:
     def __post_init__(self):
         self.remaining_quantity = self.quantity.quantity
 
+    @staticmethod
+    def try_create_from_posting(posting: Posting, transaction: Transaction) -> Optional['Lot']:
+        """
+        Attempts to create a Lot from a posting if it represents an asset acquisition
+        with sufficient cost information.
+        Returns a Lot object or None.
+        """
+        # Lot creation from balance assertion (e.g., "assets:gold = 10 GOLD @@ 20000 USD")
+        if posting.balance and posting.balance.quantity > 0 and posting.cost:
+            cost_to_use: Optional[Cost] = posting.cost
+            cost_basis_per_unit = None
+            if cost_to_use:
+                if cost_to_use.kind == CostKind.TotalCost and posting.balance.quantity != 0:
+                    cbpu_val = abs(cost_to_use.amount.quantity / posting.balance.quantity)
+                    cost_basis_per_unit = Amount(cbpu_val, cost_to_use.amount.commodity)
+                elif cost_to_use.kind == CostKind.UnitCost:
+                    cost_basis_per_unit = cost_to_use.amount
+            
+            if cost_basis_per_unit:
+                return Lot(str(transaction.date), posting.balance, cost_basis_per_unit, posting)
+
+        # Lot creation from opening transaction posting (positive amount with cost, no balance assertion part)
+        elif posting.isOpening() and posting.amount: 
+            opening_cost_to_use: Optional[Cost] = transaction.get_posting_cost(posting)
+            if opening_cost_to_use:
+                cost_basis_per_unit = None
+                if opening_cost_to_use.kind == CostKind.TotalCost and posting.amount.quantity != 0:
+                    cbpu_val = abs(opening_cost_to_use.amount.quantity / posting.amount.quantity)
+                    cost_basis_per_unit = Amount(cbpu_val, opening_cost_to_use.amount.commodity)
+                elif opening_cost_to_use.kind == CostKind.UnitCost:
+                    cost_basis_per_unit = opening_cost_to_use.amount
+
+                if cost_basis_per_unit:
+                    return Lot(str(transaction.date), posting.amount, cost_basis_per_unit, posting)
+        
+        return None
+
 @dataclass
 class Balance:
     """Base class for account balances."""
@@ -274,41 +311,21 @@ class BalanceSheet:
 
         balance_obj = account_node.get_own_balance(commodity_to_use)
 
-        # Lot creation from balance assertion (e.g., "assets:gold = 10 GOLD @@ 20000 USD")
-        if posting.balance and posting.balance.quantity > 0 and posting.cost and isinstance(balance_obj, AssetBalance):
-            cost_to_use: Optional[Cost] = posting.cost
-            cost_basis_per_unit = None
-            if cost_to_use: # Check if cost_to_use is not None
-                if cost_to_use.kind == CostKind.TotalCost and posting.balance.quantity != 0:
-                    cbpu_val = abs(cost_to_use.amount.quantity / posting.balance.quantity)
-                    cost_basis_per_unit = Amount(cbpu_val, cost_to_use.amount.commodity)
-                elif cost_to_use.kind == CostKind.UnitCost:
-                    cost_basis_per_unit = cost_to_use.amount
-            
-            if cost_basis_per_unit:
-                lot = Lot(str(transaction.date), posting.balance, cost_basis_per_unit, posting)
-                balance_obj.add_lot(lot) # This updates balance_obj.total_amount
-                account_node._propagate_total_balance_update(posting.balance) # Propagate the asserted balance
+        # Attempt to create a lot using the new static method
+        new_lot = Lot.try_create_from_posting(posting, transaction)
 
-        # Lot creation from opening transaction posting (positive amount with cost, no balance assertion part)
-        elif posting.isOpening() and posting.amount and isinstance(balance_obj, AssetBalance): 
-            # posting.amount is not None here due to isOpening()
-            opening_cost_to_use: Optional[Cost] = transaction.get_posting_cost(posting) # This might infer cost if not explicit
-            if opening_cost_to_use:
-                cost_basis_per_unit = None
-                if opening_cost_to_use.kind == CostKind.TotalCost and posting.amount.quantity != 0:
-                    cbpu_val = abs(opening_cost_to_use.amount.quantity / posting.amount.quantity)
-                    cost_basis_per_unit = Amount(cbpu_val, opening_cost_to_use.amount.commodity)
-                elif opening_cost_to_use.kind == CostKind.UnitCost:
-                    cost_basis_per_unit = opening_cost_to_use.amount
-
-                if cost_basis_per_unit:
-                    lot = Lot(str(transaction.date), posting.amount, cost_basis_per_unit, posting)
-                    balance_obj.add_lot(lot) # Updates balance_obj.total_amount
-                    account_node._propagate_total_balance_update(posting.amount) # Propagate the posting amount
+        if new_lot and isinstance(balance_obj, AssetBalance):
+            balance_obj.add_lot(new_lot)
+            # Propagate the balance change based on what was used for lot creation (posting.balance or posting.amount)
+            if posting.balance and new_lot.quantity == posting.balance: # Lot created from balance assertion
+                 account_node._propagate_total_balance_update(posting.balance)
+            elif posting.amount and new_lot.quantity == posting.amount: # Lot created from opening posting amount
+                 account_node._propagate_total_balance_update(posting.amount)
+            # If neither, something is inconsistent, but try_create_from_posting should ensure quantity matches one of them.
         
         # Regular posting amount effects (cash movements, or asset sales that reduce quantity)
-        elif posting.amount: # This will catch sales and cash postings not covered above
+        # This 'elif' ensures these are processed only if a lot wasn't created and handled above for this posting.
+        elif posting.amount:
             if isinstance(balance_obj, CashBalance):
                 balance_obj.add_posting(posting) # Updates CashBalance.total_amount
             elif isinstance(balance_obj, AssetBalance) and posting.isClosing(): # Sale of an asset
@@ -318,49 +335,6 @@ class BalanceSheet:
             # Propagate all other posting amounts that were not part of lot creation via balance assertion or opening.
             account_node._propagate_total_balance_update(posting.amount)
 
-
-    def _apply_gain_loss_to_income_accounts(self, gain_loss_amount: Amount, source_account_name: AccountName, transaction_date: date):
-        """Placeholder for applying capital gain or loss. Currently does nothing to income/expense accounts."""
-        if gain_loss_amount.quantity == 0:
-            return
-
-        # The following logic for creating synthetic postings and updating income/expense accounts
-        # has been commented out as per the requirement to not add them to the BalanceSheet.
-        # CapitalGainResult objects are still generated and stored elsewhere.
-
-        # if gain_loss_amount.quantity > 0:
-        #     gain_loss_income_expense_account_name = AccountName(["income", "capital_gains"])
-        # else:
-        #     gain_loss_income_expense_account_name = AccountName(["expenses", "capital_losses"])
-
-        # gain_loss_node = self.get_or_create_account(gain_loss_income_expense_account_name)
-        
-        # synthetic_posting = Posting(
-        #     account=gain_loss_income_expense_account_name,
-        #     amount=Amount(-gain_loss_amount.quantity, gain_loss_amount.commodity), 
-        #     comment=Comment(comment=f"Capital gain/loss from {source_account_name.name} sale on {transaction_date.strftime('%Y-%m-%d')}")
-        # )
-
-        # if synthetic_posting.amount is None: 
-        #     raise ValueError("Synthetic posting for gain/loss has no amount.")
-
-        # current_synthetic_amount: Amount = synthetic_posting.amount
-
-        # # synthetic_balance_obj = gain_loss_node.get_own_balance(current_synthetic_amount.commodity)
-        # if isinstance(synthetic_balance_obj, CashBalance): # Gains/losses are typically cash-like
-        #     synthetic_balance_obj.add_posting(synthetic_posting) # Pass the whole posting
-        # else:
-        #     account_details = ""
-        #     gain_loss_account_node = self.get_account(gain_loss_income_expense_account_name)
-        #     if gain_loss_account_node:
-        #         account_details = gain_loss_account_node._format_balances_for_error(current_synthetic_amount.commodity)
-            
-        #     raise ValueError(
-        #         f"Gain/loss account {gain_loss_income_expense_account_name.name} is not a CashBalance type for commodity {current_synthetic_amount.commodity.name}. Cannot record gain/loss.\n"
-        #         f"Account Details ({gain_loss_income_expense_account_name.name}):\n{account_details}"
-        #     )
-
-        # gain_loss_node._propagate_total_balance_update(current_synthetic_amount)
 
     def _format_transaction_cash_postings_for_error(self, transaction: Transaction, exclude_posting: Posting) -> str:
         """Formats cash postings in a transaction for error messages, excluding one specific posting."""
@@ -379,6 +353,125 @@ class BalanceSheet:
             lines.append(f"    - Acq. Date: {lot_item.acquisition_date}, Orig. Qty: {lot_item.quantity}, Rem. Qty: {lot_item.remaining_quantity}, Cost/Unit: {lot_item.cost_basis_per_unit}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _get_consolidated_proceeds(transaction: Transaction, sale_posting: Posting) -> Amount:
+        """
+        Identifies and consolidates cash proceeds from a transaction, excluding the sale posting itself.
+        Raises ValueError if proceeds are ambiguous (e.g., multiple different cash commodities).
+        Returns the total cash proceeds as an Amount. If no cash proceeds are found,
+        it implies a non-sale event for capital gains purposes, and this method will raise a ValueError
+        to signal that it shouldn't proceed with capital gains calculation in that context.
+        """
+        if sale_posting.amount is None: # Should not happen if called correctly
+            raise ValueError("Sale posting has no amount.")
+
+        cash_proceeds_postings: List[Posting] = []
+        for p in transaction.postings:
+            if p != sale_posting and p.amount and p.amount.quantity > 0 and \
+               p.amount.commodity != sale_posting.amount.commodity and p.amount.commodity.isCash() and \
+               (not p.account.name.startswith("expenses:")) and \
+               (not p.account.name.startswith("income:")):
+                cash_proceeds_postings.append(p)
+
+        if not cash_proceeds_postings:
+            # This indicates no *other* cash postings that could be proceeds.
+            # The caller (_process_asset_sale_capital_gains) should handle this by not proceeding.
+            # Raising an error here makes the contract clearer.
+            raise ValueError("No cash proceeds found for the sale.")
+
+        total_proceeds: Optional[Amount] = None
+        for p_cash in cash_proceeds_postings:
+            if p_cash.amount is None: continue # Should not happen due to check above
+            if total_proceeds is None:
+                total_proceeds = p_cash.amount
+            elif total_proceeds.commodity == p_cash.amount.commodity:
+                total_proceeds = Amount(total_proceeds.quantity + p_cash.amount.quantity, total_proceeds.commodity)
+            else:
+                # Multiple different cash commodities found as proceeds
+                # Using BalanceSheet's static context for the helper method call
+                cash_details_str = BalanceSheet._format_transaction_cash_postings_for_error(transaction, sale_posting)
+                raise ValueError(
+                    f"Multiple different cash commodities found in proceeds for transaction {transaction.date} - {transaction.payee}. Cannot reliably determine proceeds.\n"
+                    f"Cash Postings Found:\n{cash_details_str}"
+                )
+        
+        if total_proceeds is None: # Safeguard, should be caught by 'if not cash_proceeds_postings'
+            sale_posting_details = f"    Sale Posting: {sale_posting.account.name} {sale_posting.amount}"
+            raise ValueError(
+                f"Logical error: Cash proceeds postings were identified but could not be consolidated for transaction {transaction.date} - {transaction.payee}.\n"
+                f"{sale_posting_details}"
+            )
+        return total_proceeds
+
+    @staticmethod
+    def _perform_fifo_matching_and_gains(
+        sorted_lots: List[Lot], 
+        sale_quantity: Decimal, 
+        sale_commodity: Commodity, 
+        total_proceeds: Amount, 
+        sale_posting: Posting, 
+        transaction_date: date
+    ) -> tuple[List[CapitalGainResult], Decimal]:
+        """
+        Performs FIFO matching of a sale against sorted lots, calculates capital gains,
+        and updates lot remaining quantities.
+        Returns a list of CapitalGainResult objects and the remaining quantity of the sale to be matched.
+        """
+        capital_gains_results: List[CapitalGainResult] = []
+        quantity_to_match = sale_quantity
+
+        for current_lot in sorted_lots:
+            if quantity_to_match <= 0:
+                break
+            if current_lot.remaining_quantity > 0:
+                match_quantity_decimal = min(quantity_to_match, current_lot.remaining_quantity)
+                match_quantity_amount = Amount(match_quantity_decimal, sale_commodity)
+
+                cost_basis_decimal = match_quantity_decimal * current_lot.cost_basis_per_unit.quantity
+                cost_basis_amount = Amount(cost_basis_decimal, current_lot.cost_basis_per_unit.commodity)
+
+                proceeds_decimal = Decimal(0)
+                # total_proceeds.quantity corresponds to the total sale_quantity.
+                # We need to find the portion of total_proceeds for match_quantity_decimal.
+                if sale_quantity != 0: # Avoid division by zero if original sale_quantity was 0
+                    proceeds_decimal = (match_quantity_decimal / sale_quantity) * total_proceeds.quantity
+                
+                proceeds_amount = Amount(proceeds_decimal, total_proceeds.commodity)
+
+                gain_loss_amount: Amount
+                if cost_basis_amount.commodity != proceeds_amount.commodity:
+                    lot_detail_str = f"    - Acq. Date: {current_lot.acquisition_date}, Cost/Unit: {current_lot.cost_basis_per_unit}"
+                    # Note: transaction.payee is not available here, using sale_posting for context
+                    raise ValueError(
+                        f"Cost basis commodity ({cost_basis_amount.commodity.name}) and proceeds commodity ({proceeds_amount.commodity.name}) differ. Cannot accurately calculate gain/loss.\n"
+                        f"Sale Posting: {sale_posting.account.name} {sale_posting.amount}\n"
+                        f"Matched Lot Details:\n{lot_detail_str}"
+                    )
+                else:
+                    gain_loss_decimal = proceeds_decimal - cost_basis_decimal
+                    gain_loss_amount = Amount(gain_loss_decimal, proceeds_amount.commodity)
+
+                try:
+                    acquisition_date_obj = datetime.datetime.strptime(current_lot.acquisition_date, '%Y-%m-%d').date()
+                except ValueError as e:
+                    raise ValueError(f"Could not parse acquisition date '{current_lot.acquisition_date}' for lot being processed: {e}")
+
+                capital_gains_results.append(CapitalGainResult(
+                    closing_posting=sale_posting,
+                    opening_lot_original_posting=current_lot.original_posting,
+                    matched_quantity=match_quantity_amount,
+                    cost_basis=cost_basis_amount,
+                    proceeds=proceeds_amount,
+                    gain_loss=gain_loss_amount,
+                    closing_date=transaction_date, # Use passed transaction_date
+                    acquisition_date=acquisition_date_obj
+                ))
+
+                current_lot.remaining_quantity -= match_quantity_decimal
+                quantity_to_match -= match_quantity_decimal
+        
+        return capital_gains_results, quantity_to_match
+
     def _process_asset_sale_capital_gains(self, sale_posting: Posting, transaction: Transaction):
         """Processes an asset sale for capital gains calculation and application."""
         if sale_posting.amount is None:
@@ -391,125 +484,62 @@ class BalanceSheet:
         if not (closing_commodity and closing_quantity > 0):
             return
 
-        # Identify actual cash proceeds from other commodities
-        cash_proceeds_postings: List[Posting] = []
-        for p in transaction.postings:
-            if p != sale_posting and p.amount and p.amount.quantity > 0 and \
-               p.amount.commodity != closing_commodity and p.amount.commodity.isCash() and \
-               (not p.account.name.startswith("expenses:")) and \
-               (not p.account.name.startswith("income:")): # Exclude expenses and income from proceeds
-                cash_proceeds_postings.append(p)
-
-        if not cash_proceeds_postings:
-            # No cash proceeds of a different commodity found, this is likely a transfer or non-sale event.
-            # Do not treat as a sale for capital gains purposes.
-            return
-
-        # Consolidate cash proceeds
-        total_proceeds: Optional[Amount] = None
-        for p_cash in cash_proceeds_postings:
-            if p_cash.amount is None: continue # Should not happen due to check above
-            if total_proceeds is None:
-                total_proceeds = p_cash.amount
-            elif total_proceeds.commodity == p_cash.amount.commodity:
-                total_proceeds = Amount(total_proceeds.quantity + p_cash.amount.quantity, total_proceeds.commodity)
+        try:
+            total_proceeds = BalanceSheet._get_consolidated_proceeds(transaction, sale_posting)
+        except ValueError as e:
+            # If _get_consolidated_proceeds raises ValueError (e.g. "No cash proceeds found"),
+            # it means this isn't a sale for capital gains purposes, or proceeds are ambiguous.
+            # We can return early as no capital gains processing is needed.
+            # Or, if the error is about ambiguity, it's a fatal error for this transaction.
+            # For now, let's assume "No cash proceeds found" means we just skip.
+            # More specific error handling could be added if needed.
+            if "No cash proceeds found" in str(e):
+                return # Not a sale for capital gains purposes
             else:
-                # Multiple different cash commodities found as proceeds
-                cash_details_str = self._format_transaction_cash_postings_for_error(transaction, sale_posting)
-                raise ValueError(
-                    f"Multiple different cash commodities found in proceeds for transaction {transaction.date} - {transaction.payee}. Cannot reliably determine proceeds.\n"
-                    f"Cash Postings Found:\n{cash_details_str}"
-                )
-        
-        if total_proceeds is None: # Should be caught by 'if not cash_proceeds_postings' but as a safeguard
-            # This case implies something went wrong if cash_proceeds_postings was not empty
-            # but total_proceeds ended up as None.
-            sale_posting_details = f"    Sale Posting: {sale_posting.account.name} {sale_posting.amount}"
-            raise ValueError(
-                f"Logical error: Cash proceeds postings were identified but could not be consolidated for transaction {transaction.date} - {transaction.payee}.\n"
-                f"{sale_posting_details}"
-            )
+                raise # Re-raise other ValueErrors like ambiguous proceeds
 
-        proceeds_commodity_set = True # Flag that we have valid, consolidated proceeds
-
-        quantity_to_match = closing_quantity
+        # proceeds_commodity_set is implicitly true if _get_consolidated_proceeds succeeded.
+        # The variable itself is not strictly needed anymore if total_proceeds is guaranteed.
         closing_account_node = self.get_or_create_account(closing_account_name)
         all_relevant_lots = closing_account_node._collect_lots_recursive(closing_commodity)
 
         if not all_relevant_lots:
             account_balance_info = closing_account_node._format_balances_for_error(closing_commodity)
-            raise ValueError(
+            error_message = (
                 f"No lots found for {closing_account_name.name}:{closing_commodity.name} to match sale in transaction {transaction.date} - {transaction.payee}.\n"
-                f"Account {closing_account_name.name} balance for {closing_commodity.name}:\n{account_balance_info}"
+                f"Account {closing_account_name.name} balance for {closing_commodity.name}:\n{account_balance_info}\n"
+                f"Possible reason: The initial balance for {closing_commodity.name} in this account might have been asserted without a cost basis (e.g., 'assets:some_account = 10 {closing_commodity.name}' instead of 'assets:some_account = 10 {closing_commodity.name} @@ 100 USD'). "
+                f"Please ensure all opening balances for assets include a cost basis using '@@' (total cost) or '@' (per-unit cost) to allow for capital gains tracking."
             )
+            raise ValueError(error_message)
 
         try:
             sorted_lots = sorted(all_relevant_lots, key=lambda lot: datetime.datetime.strptime(lot.acquisition_date, '%Y-%m-%d').date())
         except ValueError as e:
-            # It's hard to pinpoint the exact failing lot before sorting, but we can list all acquisition dates.
             lot_acq_dates = [f"'{l.acquisition_date}'" for l in all_relevant_lots]
             raise ValueError(
                 f"Error parsing acquisition date for sorting lots for {closing_account_name.name}:{closing_commodity.name}: {e}.\n"
                 f"Problematic acquisition dates might be among: {', '.join(lot_acq_dates)}"
             )
 
-        for current_lot in sorted_lots:
-            if quantity_to_match <= 0:
-                break
-            if current_lot.remaining_quantity > 0:
-                match_quantity_decimal = min(quantity_to_match, current_lot.remaining_quantity)
-                match_quantity_amount = Amount(match_quantity_decimal, closing_commodity)
+        # Call the new helper for FIFO matching and gain calculation
+        realized_gains_for_this_sale, remaining_to_match = BalanceSheet._perform_fifo_matching_and_gains(
+            sorted_lots=sorted_lots,
+            sale_quantity=closing_quantity, # Pass the original total sale quantity
+            sale_commodity=closing_commodity,
+            total_proceeds=total_proceeds,
+            sale_posting=sale_posting,
+            transaction_date=transaction.date
+        )
+        self.capital_gains_realized.extend(realized_gains_for_this_sale)
 
-                cost_basis_decimal = match_quantity_decimal * current_lot.cost_basis_per_unit.quantity
-                cost_basis_amount = Amount(cost_basis_decimal, current_lot.cost_basis_per_unit.commodity)
-
-                proceeds_decimal = Decimal(0)
-                if closing_quantity != 0 and proceeds_commodity_set : # Ensure proceeds were found
-                    proceeds_decimal = (match_quantity_decimal / closing_quantity) * total_proceeds.quantity
-                
-                proceeds_amount = Amount(proceeds_decimal, total_proceeds.commodity if proceeds_commodity_set else cost_basis_amount.commodity) # Fallback commodity for proceeds if none found
-
-                gain_loss_amount = Amount(Decimal(0), proceeds_amount.commodity)
-                if cost_basis_amount.commodity != proceeds_amount.commodity and proceeds_commodity_set:
-                    lot_detail_str = f"    - Acq. Date: {current_lot.acquisition_date}, Cost/Unit: {current_lot.cost_basis_per_unit}"
-                    raise ValueError(
-                        f"Cost basis commodity ({cost_basis_amount.commodity.name}) and proceeds commodity ({proceeds_amount.commodity.name}) differ. Cannot accurately calculate gain/loss.\n"
-                        f"Transaction: {transaction.date} - {transaction.payee}\n"
-                        f"Sale Posting: {sale_posting.account.name} {sale_posting.amount}\n"
-                        f"Matched Lot Details:\n{lot_detail_str}"
-                    )
-                else:
-                    gain_loss_decimal = proceeds_decimal - cost_basis_decimal
-                    gain_loss_amount = Amount(gain_loss_decimal, proceeds_amount.commodity)
-
-                try:
-                    acquisition_date_obj = datetime.datetime.strptime(current_lot.acquisition_date, '%Y-%m-%d').date()
-                except ValueError as e:
-                    raise ValueError(f"Could not parse acquisition date '{current_lot.acquisition_date}' for lot being processed: {e}") # Already specific
-
-                self.capital_gains_realized.append(CapitalGainResult(
-                    closing_posting=sale_posting,
-                    opening_lot_original_posting=current_lot.original_posting,
-                    matched_quantity=match_quantity_amount,
-                    cost_basis=cost_basis_amount,
-                    proceeds=proceeds_amount,
-                    gain_loss=gain_loss_amount,
-                    closing_date=transaction.date,
-                    acquisition_date=acquisition_date_obj
-                ))
-
-                current_lot.remaining_quantity -= match_quantity_decimal
-                quantity_to_match -= match_quantity_decimal
-                
-                self._apply_gain_loss_to_income_accounts(gain_loss_amount, closing_account_name, transaction.date)
-
-        if quantity_to_match > 0:
+        if remaining_to_match > 0:
             lot_details_str = self._format_lot_details_for_error(all_relevant_lots) # Use all_relevant_lots as sorted_lots might be empty if parsing failed
             account_details_str = closing_account_node._format_balances_for_error(closing_commodity)
             error_message = (
                 f"Not enough open lots found for {closing_quantity} {closing_commodity.name} "
                 f"in {closing_account_name.name} to match closing posting in transaction "
-                f"{transaction.date} - {transaction.payee}. Remaining to match: {quantity_to_match}.\n"
+                f"{transaction.date} - {transaction.payee}. Remaining to match: {remaining_to_match}.\n"
                 f"Account Details ({closing_account_name.name} for {closing_commodity.name}):\n{account_details_str}\n"
                 f"Available Lots Considered:\n{lot_details_str}"
             )
