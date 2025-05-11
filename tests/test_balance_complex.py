@@ -3,6 +3,7 @@ import importlib # Import the importlib module
 from decimal import Decimal
 from datetime import date
 from pathlib import Path # Import Path
+from returns.maybe import Some, Nothing
 
 from src.classes import AccountName, Commodity, Amount, Cost, CostKind, Posting, Transaction
 from src.balance import BalanceSheet, Lot, Account, Balance, CashBalance, AssetBalance # Updated import
@@ -27,8 +28,9 @@ def test_calculate_balances_and_lots_partial_match_gain():
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the remaining quantity of the lot
-    xyz_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
-    assert xyz_account is not None, "XYZ account not found"
+    xyz_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
+    assert isinstance(xyz_account_maybe, Some), "XYZ account not found"
+    xyz_account = xyz_account_maybe.unwrap()
     xyz_balance = xyz_account.get_own_balance(Commodity("XYZ"))
     assert isinstance(xyz_balance, AssetBalance)
     assert len(xyz_balance.lots) == 1
@@ -53,8 +55,9 @@ def test_calculate_balances_and_lots_partial_match_loss():
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the remaining quantity of the lot
-    abc_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230101"]))
-    assert abc_account is not None, "ABC account not found"
+    abc_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230101"]))
+    assert isinstance(abc_account_maybe, Some), "ABC account not found"
+    abc_account = abc_account_maybe.unwrap()
     abc_balance = abc_account.get_own_balance(Commodity("ABC"))
     assert isinstance(abc_balance, AssetBalance)
     assert len(abc_balance.lots) == 1
@@ -80,8 +83,9 @@ def test_calculate_balances_and_lots_multiple_postings_same_commodity():
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the remaining quantity of the lot
-    xyz_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
-    assert xyz_account is not None, "XYZ account not found"
+    xyz_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
+    assert isinstance(xyz_account_maybe, Some), "XYZ account not found"
+    xyz_account = xyz_account_maybe.unwrap()
     xyz_balance = xyz_account.get_own_balance(Commodity("XYZ"))
     assert isinstance(xyz_balance, AssetBalance)
     assert len(xyz_balance.lots) == 1
@@ -107,8 +111,9 @@ def test_calculate_balances_and_lots_multiple_cash_postings():
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the remaining quantity of the lot
-    xyz_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
-    assert xyz_account is not None, "XYZ account not found"
+    xyz_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
+    assert isinstance(xyz_account_maybe, Some), "XYZ account not found"
+    xyz_account = xyz_account_maybe.unwrap()
     xyz_balance = xyz_account.get_own_balance(Commodity("XYZ"))
     assert isinstance(xyz_balance, AssetBalance)
     assert len(xyz_balance.lots) == 1
@@ -168,14 +173,16 @@ def test_crypto_transfer_no_cash_proceeds():
     assert len(balance_sheet.capital_gains_realized) == 0
 
     # Verify BTC balances
-    gemini_btc_account = balance_sheet.get_account(AccountName(parts=["assets", "broker", "gemini", "BTC"]))
-    assert gemini_btc_account is not None
+    gemini_btc_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "broker", "gemini", "BTC"]))
+    assert isinstance(gemini_btc_account_maybe, Some), "Gemini BTC account not found"
+    gemini_btc_account = gemini_btc_account_maybe.unwrap()
     gemini_btc_balance = gemini_btc_account.get_own_balance(Commodity("BTC"))
     assert isinstance(gemini_btc_balance, AssetBalance)
     assert gemini_btc_balance.total_amount.quantity == Decimal("0.5") # 1 - 0.5
 
-    kraken_btc_account = balance_sheet.get_account(AccountName(parts=["assets", "broker", "kraken", "BTC"]))
-    assert kraken_btc_account is not None
+    kraken_btc_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "broker", "kraken", "BTC"]))
+    assert isinstance(kraken_btc_account_maybe, Some), "Kraken BTC account not found"
+    kraken_btc_account = kraken_btc_account_maybe.unwrap()
     kraken_btc_balance = kraken_btc_account.get_own_balance(Commodity("BTC"))
     assert isinstance(kraken_btc_balance, AssetBalance)
     assert kraken_btc_balance.total_amount.quantity == Decimal("0.5")
@@ -244,22 +251,25 @@ def test_calculate_balances_and_lots_complex_fifo():
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify remaining quantities
-    abc_account_lot1 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230101"]))
-    assert abc_account_lot1 is not None, "ABC lot 1 account not found"
+    abc_account_lot1_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230101"]))
+    assert isinstance(abc_account_lot1_maybe, Some), "ABC lot 1 account not found"
+    abc_account_lot1 = abc_account_lot1_maybe.unwrap()
     abc_balance_lot1 = abc_account_lot1.get_own_balance(Commodity("ABC"))
     assert isinstance(abc_balance_lot1, AssetBalance)
     assert len(abc_balance_lot1.lots) == 1
     assert abc_balance_lot1.lots[0].remaining_quantity == Decimal("0") # 10 initial - 8 sold - 2 sold
 
-    abc_account_lot2 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230105"]))
-    assert abc_account_lot2 is not None, "ABC lot 2 account not found"
+    abc_account_lot2_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230105"]))
+    assert isinstance(abc_account_lot2_maybe, Some), "ABC lot 2 account not found"
+    abc_account_lot2 = abc_account_lot2_maybe.unwrap()
     abc_balance_lot2 = abc_account_lot2.get_own_balance(Commodity("ABC"))
     assert isinstance(abc_balance_lot2, AssetBalance)
     assert len(abc_balance_lot2.lots) == 1
     assert abc_balance_lot2.lots[0].remaining_quantity == Decimal("0") # 15 initial - 8 sold - 7 sold
 
-    abc_account_lot3 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230110"]))
-    assert abc_account_lot3 is not None, "ABC lot 3 account not found"
+    abc_account_lot3_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230110"]))
+    assert isinstance(abc_account_lot3_maybe, Some), "ABC lot 3 account not found"
+    abc_account_lot3 = abc_account_lot3_maybe.unwrap()
     abc_balance_lot3 = abc_account_lot3.get_own_balance(Commodity("ABC"))
     assert isinstance(abc_balance_lot3, AssetBalance)
     assert len(abc_balance_lot3.lots) == 1

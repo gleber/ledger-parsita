@@ -3,6 +3,7 @@ import importlib # Import the importlib module
 from decimal import Decimal
 from datetime import date
 from pathlib import Path # Import Path
+from returns.maybe import Some, Nothing
 
 from src.classes import AccountName, Commodity, Amount, Cost, CostKind, Posting, Transaction
 from src.balance import BalanceSheet, Lot, Account, Balance, CashBalance, AssetBalance # Updated import
@@ -44,13 +45,17 @@ def test_calculate_balances_undated_accounts():
     # Balances for asset accounts should be 0 as no lots are added in this test
 
     # expenses:food
-    expenses_food_account = balance_sheet.get_account(AccountName(parts=["expenses", "food"]))
+    expenses_food_account_maybe = balance_sheet.get_account(AccountName(parts=["expenses", "food"]))
+    assert isinstance(expenses_food_account_maybe, Some), "Expenses food account not found"
+    expenses_food_account = expenses_food_account_maybe.unwrap()
     expenses_food_balance = expenses_food_account.get_own_balance(Commodity("USD"))
     assert isinstance(expenses_food_balance, CashBalance)
     assert expenses_food_balance.total_amount == Amount(Decimal("50.00"), Commodity("USD"))
 
     # assets:bank
-    assets_bank_account = balance_sheet.get_account(AccountName(parts=["assets", "bank"]))
+    assets_bank_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "bank"]))
+    assert isinstance(assets_bank_account_maybe, Some), "Assets bank account not found"
+    assets_bank_account = assets_bank_account_maybe.unwrap()
     assets_bank_balance = assets_bank_account.get_own_balance(Commodity("USD"))
     assert isinstance(assets_bank_balance, CashBalance) # assets:bank is cash
     assert assets_bank_balance.total_amount == Amount(Decimal("-50.00") + Decimal("1500.00") - Decimal("200.00"), Commodity("USD"))
@@ -58,13 +63,17 @@ def test_calculate_balances_undated_accounts():
     # assert len(assets_bank_balance.lots) == 0 # This assertion is no longer needed as CashBalance has no lots attribute
 
     # income:salary
-    income_salary_account = balance_sheet.get_account(AccountName(parts=["income", "salary"]))
+    income_salary_account_maybe = balance_sheet.get_account(AccountName(parts=["income", "salary"]))
+    assert isinstance(income_salary_account_maybe, Some), "Income salary account not found"
+    income_salary_account = income_salary_account_maybe.unwrap()
     income_salary_balance = income_salary_account.get_own_balance(Commodity("USD"))
     assert isinstance(income_salary_balance, CashBalance)
     assert income_salary_balance.total_amount == Amount(Decimal("-1500.00"), Commodity("USD"))
 
     # assets:savings
-    assets_savings_account = balance_sheet.get_account(AccountName(parts=["assets", "savings"]))
+    assets_savings_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "savings"]))
+    assert isinstance(assets_savings_account_maybe, Some), "Assets savings account not found"
+    assets_savings_account = assets_savings_account_maybe.unwrap()
     assets_savings_balance = assets_savings_account.get_own_balance(Commodity("USD"))
     assert isinstance(assets_savings_balance, CashBalance) # assets:savings is cash
     assert assets_savings_balance.total_amount == Amount(Decimal("200.00"), Commodity("USD"))
@@ -159,19 +168,25 @@ def test_balance_sheet_building_with_assets(): # Renamed test function
     balance_sheet = BalanceSheet.from_transactions(transactions) # Updated function call
 
     # assets:bank (CashBalance)
-    assets_bank_account = balance_sheet.get_account(AccountName(parts=["assets", "bank"]))
+    assets_bank_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "bank"]))
+    assert isinstance(assets_bank_account_maybe, Some), "Assets bank account not found"
+    assets_bank_account = assets_bank_account_maybe.unwrap()
     assets_bank_balance = assets_bank_account.get_own_balance(Commodity("USD"))
     assert isinstance(assets_bank_balance, CashBalance)
     assert assets_bank_balance.total_amount == Amount(Decimal("1000.00") - Decimal("500.00") - Decimal("200.00") - Decimal("400.00"), Commodity("USD"))
 
     # equity:opening-balances (CashBalance)
-    equity_opening_account = balance_sheet.get_account(AccountName(parts=["equity", "opening-balances"]))
+    equity_opening_account_maybe = balance_sheet.get_account(AccountName(parts=["equity", "opening-balances"]))
+    assert isinstance(equity_opening_account_maybe, Some), "Equity opening account not found"
+    equity_opening_account = equity_opening_account_maybe.unwrap()
     equity_opening_balance = equity_opening_account.get_own_balance(Commodity("USD"))
     assert isinstance(equity_opening_balance, CashBalance)
     assert equity_opening_balance.total_amount == Amount(Decimal("-1000.00"), Commodity("USD"))
 
     # assets:broker:FOO:20240201 (AssetBalance)
-    foo_account = balance_sheet.get_account(AccountName(parts=["assets", "broker", "FOO", "20240201"]))
+    foo_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "broker", "FOO", "20240201"]))
+    assert isinstance(foo_account_maybe, Some), "FOO account not found"
+    foo_account = foo_account_maybe.unwrap()
     foo_balance = foo_account.get_own_balance(Commodity("FOO"))
     assert isinstance(foo_balance, AssetBalance)
     assert foo_balance.total_amount == Amount(Decimal("10"), Commodity("FOO"))
@@ -181,7 +196,9 @@ def test_balance_sheet_building_with_assets(): # Renamed test function
     assert foo_balance.lots[0].cost_basis_per_unit == Amount(Decimal("50.00"), Commodity("USD"))
 
     # assets:broker:BAR:20240301 (AssetBalance)
-    bar_account = balance_sheet.get_account(AccountName(parts=["assets", "broker", "BAR", "20240301"]))
+    bar_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "broker", "BAR", "20240301"]))
+    assert isinstance(bar_account_maybe, Some), "BAR account not found"
+    bar_account = bar_account_maybe.unwrap()
     bar_balance = bar_account.get_own_balance(Commodity("BAR"))
     assert isinstance(bar_balance, AssetBalance)
     assert bar_balance.total_amount == Amount(Decimal("5"), Commodity("BAR"))
@@ -191,7 +208,9 @@ def test_balance_sheet_building_with_assets(): # Renamed test function
     assert bar_balance.lots[0].cost_basis_per_unit == Amount(Decimal("40.00"), Commodity("USD"))
 
     # assets:broker:BAZ:20240401 (AssetBalance)
-    baz_account = balance_sheet.get_account(AccountName(parts=["assets", "broker", "BAZ", "20240401"]))
+    baz_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "broker", "BAZ", "20240401"]))
+    assert isinstance(baz_account_maybe, Some), "BAZ account not found"
+    baz_account = baz_account_maybe.unwrap()
     baz_balance = baz_account.get_own_balance(Commodity("BAZ"))
     assert isinstance(baz_balance, AssetBalance)
     assert baz_balance.total_amount == Amount(Decimal("20"), Commodity("BAZ"))
@@ -220,7 +239,9 @@ def test_calculate_balances_and_lots_simple_capital_gain():
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the remaining quantity of the lot
-    aapl_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    aapl_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    assert isinstance(aapl_account_maybe, Some), "AAPL account not found"
+    aapl_account = aapl_account_maybe.unwrap()
     aapl_balance = aapl_account.get_own_balance(Commodity("AAPL"))
     assert isinstance(aapl_balance, AssetBalance)
     assert len(aapl_balance.lots) == 1
@@ -249,13 +270,17 @@ def test_calculate_balances_and_lots_multiple_opens_single_close():
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the remaining quantity of the lots
-    aapl_account_lot1 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    aapl_account_lot1_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    assert isinstance(aapl_account_lot1_maybe, Some), "AAPL lot 1 account not found"
+    aapl_account_lot1 = aapl_account_lot1_maybe.unwrap()
     aapl_balance_lot1 = aapl_account_lot1.get_own_balance(Commodity("AAPL"))
     assert isinstance(aapl_balance_lot1, AssetBalance)
     assert len(aapl_balance_lot1.lots) == 1
     assert aapl_balance_lot1.lots[0].remaining_quantity == Decimal("0") # 10 initial - 10 matched
 
-    aapl_account_lot2 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230105"]))
+    aapl_account_lot2_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230105"]))
+    assert isinstance(aapl_account_lot2_maybe, Some), "AAPL lot 2 account not found"
+    aapl_account_lot2 = aapl_account_lot2_maybe.unwrap()
     aapl_balance_lot2 = aapl_account_lot2.get_own_balance(Commodity("AAPL"))
     assert isinstance(aapl_balance_lot2, AssetBalance)
     assert len(aapl_balance_lot2.lots) == 1
@@ -284,7 +309,9 @@ def test_calculate_balances_and_lots_single_open_multiple_closes():
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the remaining quantity of the lot
-    aapl_account_lot1 = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    aapl_account_lot1_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    assert isinstance(aapl_account_lot1_maybe, Some), "AAPL lot 1 account not found"
+    aapl_account_lot1 = aapl_account_lot1_maybe.unwrap()
     aapl_balance_lot1 = aapl_account_lot1.get_own_balance(Commodity("AAPL"))
     assert isinstance(aapl_balance_lot1, AssetBalance)
     assert len(aapl_balance_lot1.lots) == 1
@@ -318,13 +345,17 @@ def test_calculate_balances_and_lots_multiple_assets():
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify remaining quantities
-    aapl_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    aapl_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    assert isinstance(aapl_account_maybe, Some), "AAPL account not found"
+    aapl_account = aapl_account_maybe.unwrap()
     aapl_balance = aapl_account.get_own_balance(Commodity("AAPL"))
     assert isinstance(aapl_balance, AssetBalance)
     assert len(aapl_balance.lots) == 1
     assert aapl_balance.lots[0].remaining_quantity == Decimal("5") # 10 initial - 5 sold
 
-    msft_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "MSFT", "20230102"]))
+    msft_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "MSFT", "20230102"]))
+    assert isinstance(msft_account_maybe, Some), "MSFT account not found"
+    msft_account = msft_account_maybe.unwrap()
     msft_balance = msft_account.get_own_balance(Commodity("MSFT"))
     assert isinstance(msft_balance, AssetBalance)
     assert len(msft_balance.lots) == 1
@@ -348,14 +379,17 @@ def test_calculate_balances_and_lots_excludes_non_asset_closing_postings():
 
     # No capital gains should be calculated for non-asset closing postings
     income_account_name = AccountName(parts=["income", "capital_gains"])
-    income_account = balance_sheet.get_account(income_account_name)
+    income_account_maybe = balance_sheet.get_account(income_account_name)
     # The account might not exist if no gains were calculated, so check if it exists first
-    if income_account is not None:
+    if isinstance(income_account_maybe, Some):
+        income_account = income_account_maybe.unwrap()
         income_balance = income_account.get_own_balance(Commodity("USD"))
         assert income_balance.total_amount.quantity == Decimal("0")
 
     # Verify remaining quantity of the lot (should be unchanged)
-    aapl_account = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    aapl_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
+    assert isinstance(aapl_account_maybe, Some), "AAPL account not found"
+    aapl_account = aapl_account_maybe.unwrap()
     aapl_balance = aapl_account.get_own_balance(Commodity("AAPL"))
     assert isinstance(aapl_balance, AssetBalance)
     assert len(aapl_balance.lots) == 1
@@ -379,9 +413,10 @@ def test_calculate_balances_and_lots_handles_undated_open_accounts():
     balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
 
     # Verify the remaining quantity of the lot
-    btc_account = balance_sheet.get_account(AccountName(parts=["assets", "crypto", "BTC", "20230101"]))
+    btc_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "crypto", "BTC", "20230101"]))
+    assert isinstance(btc_account_maybe, Some), "BTC account not found"
+    btc_account = btc_account_maybe.unwrap()
     btc_balance = btc_account.get_own_balance(Commodity("BTC"))
     assert isinstance(btc_balance, AssetBalance)
     assert len(btc_balance.lots) == 1
     assert btc_balance.lots[0].remaining_quantity == Decimal("0.5") # 1 initial - 0.5 sold
-

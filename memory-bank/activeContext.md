@@ -6,6 +6,7 @@ This document outlines the current focus and active considerations for ledger-pa
 
 - **Completed Phase 1: Integrated Capital Gains Calculation into Balance Sheet Builder.**
 - **Completed adding date filters (`before:`, `after:`, `period:`) with partial date support.**
+- **Refactored error handling in `_get_consolidated_proceeds` and `_process_asset_sale_capital_gains` in `src/balance.py` to use `Result` pattern and custom error types (`NoCashProceedsFoundError`, `AmbiguousProceedsError`).**
 - Starting Phase 2: Improvements.
 - Preparing for Phase 3: Future Steps.
 
@@ -94,7 +95,7 @@ This document outlines the current focus and active considerations for ledger-pa
     - The `Account` class now has `format_flat_lines` to format a single account's data for flat view, and `get_all_subaccounts` to recursively collect all subaccounts.
     - `BalanceSheet.format_account_hierarchy` and `BalanceSheet.format_account_flat` now delegate to the respective methods in the `Account` class.
     - Updated `tests/test_balance_printing.py` to align with these changes, ensuring all tests pass.
-- **Updated `Account.format_hierarchical` in `src/balance.py` to suppress printing of zero-balance commodity lines and to avoid printing account names if the account itself and its children have no non-zero balances to display for the current mode. All tests in `tests/test_balance_printing.py` and subsequently all project tests pass after this change.**
+- **Updated `Account.format_hierarchical` in `src/balance.py` to suppress printing of zero-balance commodity lines and to avoid printing account names if the account itself and its children have no non-zero balances to display for the current mode. All project tests pass after this change.**
 - **Refactored `Result` handling in `src/main.py` CLI commands to use an early return pattern with `is_successful` from `returns.pipeline`, replacing `match` statements.**
 - **Separated capital gains reporting from the `balance` command into a new `gains` command in `src/main.py`.**
 - **Added `BalanceSheet.from_journal(journal)` static method to `src/balance.py` and updated `balance_cmd` and `gains_cmd` in `src/main.py` to use it.**
@@ -111,6 +112,8 @@ This document outlines the current focus and active considerations for ledger-pa
     - Extracted lot creation logic into `Lot.try_create_from_posting`.
     - Updated `BalanceSheet._process_asset_sale_capital_gains` and `BalanceSheet._apply_direct_posting_effects` to use these new helper methods.
     - All tests (144 passed, 1 skipped) pass after these refactorings.
+- **Refactored error handling in `_get_consolidated_proceeds` and `_process_asset_sale_capital_gains` in `src/balance.py` to use `Result` pattern and custom error types (`NoCashProceedsFoundError`, `AmbiguousProceedsError`). This eliminates the string-based check for "No cash proceeds found".**
+- **Refactored functions in `src/balance.py` (`Lot.try_create_from_posting`, `Account.get_account`, `BalanceSheet.get_account`) to use `Maybe[T]` from the `returns` library instead of `Optional[T]`. Updated all relevant test files to correctly handle the `Maybe` type and its assertions. All 144 tests pass (1 skipped).**
 
 ## Next Steps
 
@@ -136,13 +139,16 @@ This document outlines the current focus and active considerations for ledger-pa
 - **Balance printing logic is now primarily encapsulated within the `Account` class, with `BalanceSheet` orchestrating the report generation.**
 - **The `BalanceSheet.apply_transaction` method has been refactored to use helper methods for clarity and better organization, processing transactions in a single pass.**
 - **Cost basis inference in `Transaction.get_posting_cost` now handles RSU-style income by assigning a $0 cost basis.**
-- **Proceeds identification in `BalanceSheet._process_asset_sale_capital_gains` now excludes `expenses:` and `income:` accounts, rather than requiring specific `assets:cash/bank` or `liabilities` accounts.**
+- **Proceeds identification in `BalanceSheet._get_consolidated_proceeds` now excludes `expenses:` and `income:` accounts, rather than requiring specific `assets:cash/bank` or `liabilities` accounts.**
+- **Error handling for proceeds consolidation now uses the `Result` pattern with custom error types (`NoCashProceedsFoundError`, `AmbiguousProceedsError`) for better type safety and clarity.**
+- **Optional return values in `src/balance.py` are now represented using `Maybe[T]` from the `returns` library, improving explicitness in handling potentially absent values.**
 
 ## Important Patterns and Preferences
 
 - Adhere to Python best practices and maintainable code.
 - Prioritize accurate parsing and robust error handling.
 - Utilize the implemented caching mechanism for efficient source position lookups.
+- **Employ the `Result` pattern from the `returns` library for functions that can fail in predictable ways, enhancing error handling clarity and robustness.**
 
 ## Learnings and Project Insights
 
@@ -155,3 +161,5 @@ This document outlines the current focus and active considerations for ledger-pa
 - Adapted existing tests to verify the new integrated logic.
 - Resolved test failures (`AttributeError`, `AssertionError`, `IndentationError`, Mypy errors) related to storing `CapitalGainResult` in `BalanceSheet`, including fixing variable shadowing.
 - Debugging CLI test failures requires careful examination of `stdout` and `stderr` from `subprocess.run`.
+- **Using the `Result` pattern improves the explicitness of functions that can fail and makes the calling code more robust by forcing explicit handling of `Success` and `Failure` cases.**
+- **Using the `Maybe` pattern for optional values makes the code more explicit about how potentially missing data is handled.**

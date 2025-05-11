@@ -66,6 +66,8 @@ This document tracks the progress, completed features, and remaining tasks for l
     - `Lot.try_create_from_posting` (static method on `Lot` class) now encapsulates logic for creating `Lot` objects from postings.
     - `_process_asset_sale_capital_gains` and `_apply_direct_posting_effects` were updated to delegate to these new static helper methods.
     - All 144 tests pass after these changes.
+- **Refactored error handling in `_get_consolidated_proceeds` and `_process_asset_sale_capital_gains` in `src/balance.py` to use the `Result` pattern from the `returns` library. This includes introducing `ConsolidatedProceedsError`, `NoCashProceedsFoundError`, and `AmbiguousProceedsError` custom error types, eliminating the string-based check for "No cash proceeds found".**
+- **Refactored functions in `src/balance.py` (`Lot.try_create_from_posting`, `Account.get_account`, `BalanceSheet.get_account`) to use `Maybe[T]` from the `returns` library instead of `Optional[T]`. Updated all relevant test files to correctly handle the `Maybe` type and its assertions. All 144 tests pass (1 skipped).**
 
 ## What's Left to Build
 
@@ -89,6 +91,7 @@ This document tracks the progress, completed features, and remaining tasks for l
 - **Implemented `--flat` and `--display` options for the `balance` CLI command, including refactoring printing logic into generators and adding dedicated tests.**
 - **Test cases in `tests/test_balance_printing.py` have been significantly simplified and all are passing.**
 - **All previously failing tests related to capital gains logic have been fixed.**
+- **Error handling for proceeds consolidation in `src/balance.py` has been refactored using the `Result` pattern.**
 - Ready to begin Phase 2 (Generating journal entries, updating files).
 
 ## Known Issues
@@ -109,3 +112,5 @@ This document tracks the progress, completed features, and remaining tasks for l
 - **Cost basis inference in `Transaction.get_posting_cost` now handles RSU-style income by assigning a $0 cost basis.**
 - **Proceeds identification in `BalanceSheet._get_consolidated_proceeds` (previously in `_process_asset_sale_capital_gains`) now excludes `expenses:` and `income:` accounts.**
 - **Lot creation logic is now encapsulated in `Lot.try_create_from_posting`.**
+- **Error handling for proceeds consolidation in `src/balance.py` now uses the `Result` pattern with custom error types, making it more robust and explicit.**
+- **Optional return values in `src/balance.py` are now represented using `Maybe[T]` from the `returns` library, improving explicitness in handling potentially absent values.**

@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Dict, List, Union, Optional, Generator # Import Generator
 import datetime
+from returns.result import Result, Success, Failure
+from returns.maybe import Maybe, Some, Nothing
 from datetime import date
 from collections import defaultdict # Import defaultdict
 
@@ -21,41 +23,43 @@ class Lot:
         self.remaining_quantity = self.quantity.quantity
 
     @staticmethod
-    def try_create_from_posting(posting: Posting, transaction: Transaction) -> Optional['Lot']:
+    def try_create_from_posting(posting: Posting, transaction: Transaction) -> Maybe['Lot']:
         """
         Attempts to create a Lot from a posting if it represents an asset acquisition
         with sufficient cost information.
-        Returns a Lot object or None.
+        Returns a Maybe[Lot] object.
         """
         # Lot creation from balance assertion (e.g., "assets:gold = 10 GOLD @@ 20000 USD")
         if posting.balance and posting.balance.quantity > 0 and posting.cost:
-            cost_to_use: Optional[Cost] = posting.cost
-            cost_basis_per_unit = None
-            if cost_to_use:
-                if cost_to_use.kind == CostKind.TotalCost and posting.balance.quantity != 0:
-                    cbpu_val = abs(cost_to_use.amount.quantity / posting.balance.quantity)
-                    cost_basis_per_unit = Amount(cbpu_val, cost_to_use.amount.commodity)
-                elif cost_to_use.kind == CostKind.UnitCost:
-                    cost_basis_per_unit = cost_to_use.amount
+            cost_to_use: Maybe[Cost] = Maybe.from_optional(posting.cost)
             
-            if cost_basis_per_unit:
-                return Lot(str(transaction.date), posting.balance, cost_basis_per_unit, posting)
+            cost_basis_per_unit_maybe: Maybe[Amount] = cost_to_use.bind(
+                lambda c:
+                    Some(Amount(abs(c.amount.quantity / posting.balance.quantity), c.amount.commodity)) # type: ignore
+                    if c.kind == CostKind.TotalCost and posting.balance and posting.balance.quantity != 0 # type: ignore
+                    else (Some(c.amount) if c.kind == CostKind.UnitCost else Nothing)
+            )
+
+            return cost_basis_per_unit_maybe.map(
+                lambda cbpu: Lot(str(transaction.date), posting.balance, cbpu, posting) # type: ignore
+            )
 
         # Lot creation from opening transaction posting (positive amount with cost, no balance assertion part)
-        elif posting.isOpening() and posting.amount: 
-            opening_cost_to_use: Optional[Cost] = transaction.get_posting_cost(posting)
-            if opening_cost_to_use:
-                cost_basis_per_unit = None
-                if opening_cost_to_use.kind == CostKind.TotalCost and posting.amount.quantity != 0:
-                    cbpu_val = abs(opening_cost_to_use.amount.quantity / posting.amount.quantity)
-                    cost_basis_per_unit = Amount(cbpu_val, opening_cost_to_use.amount.commodity)
-                elif opening_cost_to_use.kind == CostKind.UnitCost:
-                    cost_basis_per_unit = opening_cost_to_use.amount
+        elif posting.isOpening() and posting.amount:
+            opening_cost_to_use_maybe: Maybe[Cost] = Maybe.from_optional(transaction.get_posting_cost(posting))
 
-                if cost_basis_per_unit:
-                    return Lot(str(transaction.date), posting.amount, cost_basis_per_unit, posting)
+            cost_basis_per_unit_maybe: Maybe[Amount] = opening_cost_to_use_maybe.bind(
+                lambda c:
+                    Some(Amount(abs(c.amount.quantity / posting.amount.quantity), c.amount.commodity)) # type: ignore
+                    if c.kind == CostKind.TotalCost and posting.amount and posting.amount.quantity != 0 # type: ignore
+                    else (Some(c.amount) if c.kind == CostKind.UnitCost else Nothing)
+            )
+            
+            return cost_basis_per_unit_maybe.map(
+                lambda cbpu: Lot(str(transaction.date), posting.amount, cbpu, posting) # type: ignore
+            )
         
-        return None
+        return Nothing
 
 @dataclass
 class Balance:
@@ -214,15 +218,18 @@ class Account:
             accounts.extend(child.get_all_subaccounts())
         return accounts
 
-    def get_account(self, account_name_parts: List[str]) -> Optional['Account']:
-        """Recursively returns the Account node for the given account name parts, or None if not found."""
+    def get_account(self, account_name_parts: List[str]) -> Maybe['Account']:
+        """Recursively returns the Account node for the given account name parts, or Nothing if not found."""
         if not account_name_parts:
-            return self
+            return Some(self)
+        
         first_part = account_name_parts[0]
-        if first_part in self.children:
-            return self.children[first_part].get_account(account_name_parts[1:])
-        else:
-            return None
+        
+        # Get child as Maybe[Account]
+        child_maybe: Maybe[Account] = Maybe.from_optional(self.children.get(first_part))
+        
+        # Recursively call get_account on the child if it exists
+        return child_maybe.bind(lambda child_account: child_account.get_account(account_name_parts[1:]))
 
     def _collect_lots_recursive(self, commodity: Commodity) -> List[Lot]:
         """Recursively collects all Lot objects for a commodity from this account and its children."""
@@ -269,14 +276,30 @@ class BalanceSheet:
     root_accounts: Dict[str, Account] = field(default_factory=dict)
     capital_gains_realized: List[CapitalGainResult] = field(default_factory=list)
 
-    def get_account(self, account_name: AccountName) -> Optional[Account]:
+    # Custom Error types for _get_consolidated_proceeds
+    class ConsolidatedProceedsError(Exception):
+        """Base class for errors during proceed consolidation."""
+        pass
+
+    class NoCashProceedsFoundError(ConsolidatedProceedsError):
+        """Raised when no cash proceeds are found for a sale."""
+        pass
+
+    class AmbiguousProceedsError(ConsolidatedProceedsError):
+        """Raised when proceeds are ambiguous (e.g., multiple cash commodities)."""
+        pass
+
+    def get_account(self, account_name: AccountName) -> Maybe[Account]:
         if not account_name.parts:
-            return None
+            return Nothing
+        
         first_part = account_name.parts[0]
-        if first_part in self.root_accounts:
-            return self.root_accounts[first_part].get_account(account_name.parts[1:])
-        else:
-            return None
+        
+        # Get root account as Maybe[Account]
+        root_account_maybe: Maybe[Account] = Maybe.from_optional(self.root_accounts.get(first_part))
+        
+        # Call get_account on the root account if it exists
+        return root_account_maybe.bind(lambda acc: acc.get_account(account_name.parts[1:]))
 
     def get_or_create_account(self, account_name: AccountName) -> Account:
         current_node: Optional[Account] = None
@@ -312,20 +335,27 @@ class BalanceSheet:
         balance_obj = account_node.get_own_balance(commodity_to_use)
 
         # Attempt to create a lot using the new static method
-        new_lot = Lot.try_create_from_posting(posting, transaction)
-
-        if new_lot and isinstance(balance_obj, AssetBalance):
-            balance_obj.add_lot(new_lot)
-            # Propagate the balance change based on what was used for lot creation (posting.balance or posting.amount)
-            if posting.balance and new_lot.quantity == posting.balance: # Lot created from balance assertion
-                 account_node._propagate_total_balance_update(posting.balance)
-            elif posting.amount and new_lot.quantity == posting.amount: # Lot created from opening posting amount
-                 account_node._propagate_total_balance_update(posting.amount)
-            # If neither, something is inconsistent, but try_create_from_posting should ensure quantity matches one of them.
+        maybe_new_lot: Maybe[Lot] = Lot.try_create_from_posting(posting, transaction)
         
+        lot_created_and_processed = False
+        if isinstance(balance_obj, AssetBalance):
+            # Define a function to process the lot if it exists
+            def process_lot(lot_val: Lot) -> Lot:
+                nonlocal lot_created_and_processed
+                balance_obj.add_lot(lot_val)
+                # Propagate the balance change
+                if posting.balance and lot_val.quantity == posting.balance:
+                    account_node._propagate_total_balance_update(posting.balance)
+                elif posting.amount and lot_val.quantity == posting.amount:
+                    account_node._propagate_total_balance_update(posting.amount)
+                lot_created_and_processed = True
+                return lot_val # map expects a return value
+
+            maybe_new_lot.map(process_lot)
+
         # Regular posting amount effects (cash movements, or asset sales that reduce quantity)
-        # This 'elif' ensures these are processed only if a lot wasn't created and handled above for this posting.
-        elif posting.amount:
+        # This condition ensures these are processed only if a lot wasn't created and handled above.
+        if not lot_created_and_processed and posting.amount:
             if isinstance(balance_obj, CashBalance):
                 balance_obj.add_posting(posting) # Updates CashBalance.total_amount
             elif isinstance(balance_obj, AssetBalance) and posting.isClosing(): # Sale of an asset
@@ -335,8 +365,8 @@ class BalanceSheet:
             # Propagate all other posting amounts that were not part of lot creation via balance assertion or opening.
             account_node._propagate_total_balance_update(posting.amount)
 
-
-    def _format_transaction_cash_postings_for_error(self, transaction: Transaction, exclude_posting: Posting) -> str:
+    @staticmethod
+    def _format_transaction_cash_postings_for_error(transaction: Transaction, exclude_posting: Posting) -> str:
         """Formats cash postings in a transaction for error messages, excluding one specific posting."""
         lines = []
         for p in transaction.postings:
@@ -354,16 +384,14 @@ class BalanceSheet:
         return "\n".join(lines)
 
     @staticmethod
-    def _get_consolidated_proceeds(transaction: Transaction, sale_posting: Posting) -> Amount:
+    def _get_consolidated_proceeds(transaction: Transaction, sale_posting: Posting) -> Result[Amount, ConsolidatedProceedsError]:
         """
         Identifies and consolidates cash proceeds from a transaction, excluding the sale posting itself.
-        Raises ValueError if proceeds are ambiguous (e.g., multiple different cash commodities).
-        Returns the total cash proceeds as an Amount. If no cash proceeds are found,
-        it implies a non-sale event for capital gains purposes, and this method will raise a ValueError
-        to signal that it shouldn't proceed with capital gains calculation in that context.
+        Returns a Result containing the total cash proceeds as an Amount, or a ConsolidatedProceedsError.
         """
         if sale_posting.amount is None: # Should not happen if called correctly
-            raise ValueError("Sale posting has no amount.")
+            # This is an internal logic error, not a typical proceeds issue.
+            return Failure(BalanceSheet.ConsolidatedProceedsError("Sale posting has no amount."))
 
         cash_proceeds_postings: List[Posting] = []
         for p in transaction.postings:
@@ -375,9 +403,8 @@ class BalanceSheet:
 
         if not cash_proceeds_postings:
             # This indicates no *other* cash postings that could be proceeds.
-            # The caller (_process_asset_sale_capital_gains) should handle this by not proceeding.
-            # Raising an error here makes the contract clearer.
-            raise ValueError("No cash proceeds found for the sale.")
+            # This indicates no *other* cash postings that could be proceeds.
+            return Failure(BalanceSheet.NoCashProceedsFoundError("No cash proceeds found for the sale."))
 
         total_proceeds: Optional[Amount] = None
         for p_cash in cash_proceeds_postings:
@@ -388,20 +415,20 @@ class BalanceSheet:
                 total_proceeds = Amount(total_proceeds.quantity + p_cash.amount.quantity, total_proceeds.commodity)
             else:
                 # Multiple different cash commodities found as proceeds
-                # Using BalanceSheet's static context for the helper method call
                 cash_details_str = BalanceSheet._format_transaction_cash_postings_for_error(transaction, sale_posting)
-                raise ValueError(
+                return Failure(BalanceSheet.AmbiguousProceedsError(
                     f"Multiple different cash commodities found in proceeds for transaction {transaction.date} - {transaction.payee}. Cannot reliably determine proceeds.\n"
                     f"Cash Postings Found:\n{cash_details_str}"
-                )
+                ))
         
         if total_proceeds is None: # Safeguard, should be caught by 'if not cash_proceeds_postings'
             sale_posting_details = f"    Sale Posting: {sale_posting.account.name} {sale_posting.amount}"
-            raise ValueError(
+            # This is an internal logic error.
+            return Failure(BalanceSheet.ConsolidatedProceedsError(
                 f"Logical error: Cash proceeds postings were identified but could not be consolidated for transaction {transaction.date} - {transaction.payee}.\n"
                 f"{sale_posting_details}"
-            )
-        return total_proceeds
+            ))
+        return Success(total_proceeds)
 
     @staticmethod
     def _perform_fifo_matching_and_gains(
@@ -484,22 +511,21 @@ class BalanceSheet:
         if not (closing_commodity and closing_quantity > 0):
             return
 
-        try:
-            total_proceeds = BalanceSheet._get_consolidated_proceeds(transaction, sale_posting)
-        except ValueError as e:
-            # If _get_consolidated_proceeds raises ValueError (e.g. "No cash proceeds found"),
-            # it means this isn't a sale for capital gains purposes, or proceeds are ambiguous.
-            # We can return early as no capital gains processing is needed.
-            # Or, if the error is about ambiguity, it's a fatal error for this transaction.
-            # For now, let's assume "No cash proceeds found" means we just skip.
-            # More specific error handling could be added if needed.
-            if "No cash proceeds found" in str(e):
-                return # Not a sale for capital gains purposes
-            else:
-                raise # Re-raise other ValueErrors like ambiguous proceeds
+        proceeds_result = BalanceSheet._get_consolidated_proceeds(transaction, sale_posting)
 
-        # proceeds_commodity_set is implicitly true if _get_consolidated_proceeds succeeded.
-        # The variable itself is not strictly needed anymore if total_proceeds is guaranteed.
+        if isinstance(proceeds_result, Failure):
+            failure_value = proceeds_result.failure()
+            if isinstance(failure_value, BalanceSheet.NoCashProceedsFoundError):
+                return  # Not a sale for capital gains purposes, return early
+            elif isinstance(failure_value, BalanceSheet.AmbiguousProceedsError):
+                # Ambiguous proceeds are a fatal error for this transaction's capital gains.
+                raise ValueError(str(failure_value))
+            else: # Other ConsolidatedProceedsError or unexpected error
+                raise ValueError(f"Error consolidating proceeds: {str(failure_value)}")
+        
+        # If we reach here, proceeds_result is Success
+        total_proceeds: Amount = proceeds_result.unwrap()
+
         closing_account_node = self.get_or_create_account(closing_account_name)
         all_relevant_lots = closing_account_node._collect_lots_recursive(closing_commodity)
 

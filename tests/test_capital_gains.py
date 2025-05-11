@@ -2,6 +2,7 @@ import pytest
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from returns.maybe import Some, Nothing
 
 from src.classes import (
     Journal,
@@ -59,8 +60,9 @@ def test_capital_gains_rsu_style_income_then_sale():
     assert gain_result.acquisition_date == date(2014, 12, 31)
 
     # Verify the asset account is now zero
-    asset_account = balance_sheet.get_account(AccountName(parts=["assets", "broker", "schwab", "GOOG", "20141226"]))
-    assert asset_account is not None
+    asset_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "broker", "schwab", "GOOG", "20141226"]))
+    assert isinstance(asset_account_maybe, Some), "Asset account GOOG:20141226 not found"
+    asset_account = asset_account_maybe.unwrap()
     asset_balance = asset_account.get_own_balance(Commodity("GOOG"))
     assert isinstance(asset_balance, AssetBalance) 
     assert asset_balance.total_amount.quantity == Decimal("0")
@@ -108,8 +110,9 @@ def test_capital_gains_opening_balance_then_partial_sell():
     assert gain_result.acquisition_date == date(2023, 1, 1) # From dated subaccount (year directive + date in account)
 
     # Verify the remaining asset account balance
-    asset_account = balance_sheet.get_account(AccountName(parts=["assets", "broker", "tastytrade", "SOL", "20230101"])) # This is correct
-    assert asset_account is not None
+    asset_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "broker", "tastytrade", "SOL", "20230101"])) # This is correct
+    assert isinstance(asset_account_maybe, Some), "Asset account SOL:20230101 not found"
+    asset_account = asset_account_maybe.unwrap()
     asset_balance = asset_account.get_own_balance(Commodity("SOL"))
     assert isinstance(asset_balance, AssetBalance) 
     assert asset_balance.total_amount.quantity == Decimal("8") # 10 initial - 2 sold = 8 remaining

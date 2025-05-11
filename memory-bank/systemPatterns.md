@@ -13,7 +13,7 @@ This document describes the system architecture and key design patterns used in 
 
 - Using Python for development due to its suitability for text processing and data manipulation.
 - Using the `parsita` library for parsing the hledger journal format.
-- Using the `returns` library for error handling.
+- Using the `returns` library for error handling, particularly the `Result` pattern (`Success`, `Failure`).
 - **Implemented a robust FIFO logic by iterating through transactions to find sales and matching them against lots stored in the `BalanceSheet`. This logic is now integrated into the Balance Sheet Builder.**
 - **Designing a mechanism for safely updating the hledger journal file in place (future step).**
 - **Implemented an in-memory caching mechanism for source position lookups to improve parsing performance.**
@@ -29,6 +29,8 @@ This document describes the system architecture and key design patterns used in 
         - Creates `Lot` objects for acquisitions by calling the static `Lot.try_create_from_posting` method. This method encapsulates the logic for identifying lot creation scenarios (balance assertions with cost, opening postings with cost) and calculating cost basis per unit.
     - `_process_asset_sale_capital_gains`:
         - Consolidates proceeds by calling the static helper `BalanceSheet._get_consolidated_proceeds`.
+            - **This method now returns `Result[Amount, ConsolidatedProceedsError]`.**
+            - **`ConsolidatedProceedsError` has subtypes `NoCashProceedsFoundError` and `AmbiguousProceedsError` to represent specific failure modes.**
         - Performs FIFO matching and calculates gains/losses by calling the static helper `BalanceSheet._perform_fifo_matching_and_gains`. This helper updates `Lot.remaining_quantity` and returns `CapitalGainResult` objects.
     - Overall responsibilities include:
         - Calculating running balances for all accounts by updating `Account.own_balances` and `Account.total_balances`.
@@ -39,7 +41,7 @@ This document describes the system architecture and key design patterns used in 
         - Updating the `remaining_quantity` of matched `Lot` objects.
         - **Applying the calculated gain/loss by creating synthetic postings to the appropriate income/expense accounts, which in turn updates their balances.**
         - **Storing detailed gain/loss results (`CapitalGainResult` objects) in the `capital_gains_realized` list within the `BalanceSheet`.**
-        - **Conditions that previously issued warnings (e.g., insufficient lots, mismatched commodities, no proceeds) now raise `ValueError` exceptions, making them fatal.**
+        - **Conditions that previously issued warnings (e.g., insufficient lots, mismatched commodities) now raise `ValueError` exceptions, making them fatal. The "no proceeds" condition is now handled via the `Result` pattern from `_get_consolidated_proceeds`.**
 - **Filter Pattern:** A mechanism for applying various criteria to filter transactions and postings. This includes:
     - Defining filter conditions (`BaseFilter` and its subclasses like `AccountFilter`, `DateFilter`, `DescriptionFilter`, `AmountFilter`, `TagFilter`, `BeforeDateFilter`, `AfterDateFilter`, `PeriodFilter`), the `Filters` class, and the `FilterListParamType` in `src/filtering.py`.
     - Using the `FilterListParamType` in `src/main.py` to parse filter strings from the command line into a `Filters` object.
@@ -48,6 +50,8 @@ This document describes the system architecture and key design patterns used in 
     - Using the `Filters.apply_to_entries()` method to filter journal entries.
 - **Journal Updater Pattern:** A component responsible for modifying the journal file in place (future implementation, potentially using stored `CapitalGainResult` data).
 - **Caching Pattern:** Utilized (`src/classes.py:SourceCacheManager`) for optimizing source position lookups during parsing.
+- **Result Pattern:** Used with `returns.result.Result` (`Success`, `Failure`) for functions that can fail in predictable ways, such as `BalanceSheet._get_consolidated_proceeds`. This enhances error handling by making failure cases explicit and type-safe.
+- **Maybe Pattern:** Used with `returns.maybe.Maybe` (`Some`, `Nothing`) for functions that can return an optional value (e.g., `Lot.try_create_from_posting`, `Account.get_account`, `BalanceSheet.get_account`). This makes handling of potentially absent values more explicit.
 
 ## Component Relationships
 
@@ -55,13 +59,13 @@ This document describes the system architecture and key design patterns used in 
 - The `Journal` object is processed by `BalanceSheet.from_journal` (which internally uses `BalanceSheet.from_transactions` that iteratively calls `BalanceSheet.apply_transaction`).
 - The `BalanceSheet.apply_transaction` method:
     - Calls `_apply_direct_posting_effects` which uses `Lot.try_create_from_posting` to identify and create `Lot` objects.
-    - Calls `_process_asset_sale_capital_gains` upon encountering closing postings. This method, in turn, uses `_get_consolidated_proceeds` and `_perform_fifo_matching_and_gains` to perform FIFO matching, calculate gains/losses, update lot quantities, and generate `CapitalGainResult` objects.
+    - Calls `_process_asset_sale_capital_gains` upon encountering closing postings. This method, in turn, uses `_get_consolidated_proceeds` (which returns a `Result`) and `_perform_fifo_matching_and_gains` to perform FIFO matching, calculate gains/losses, update lot quantities, and generate `CapitalGainResult` objects.
 - The final `BalanceSheet` produced contains all account balances **and a list of detailed `CapitalGainResult` objects.**
 - The **CLI** (`src/main.py`):
     - Uses a custom `click.ParamType` to parse filter strings.
     - Calls `Journal.parse_from_file` to get a `Journal` object (or a `Failure`).
     - Handles `Result` objects using an early return pattern (`is_successful`).
-    - For `balance` and `gains` commands, calls `BalanceSheet.from_journal` and catches potential `ValueErrors` from capital gains calculations.
+    - For `balance` and `gains` commands, calls `BalanceSheet.from_journal` and catches potential `ValueErrors` from capital gains calculations (including those propagated from `Failure` cases in `_get_consolidated_proceeds`).
     - The `balance` command displays account balances.
     - The `gains` command displays capital gains results.
 - The **Caching** mechanism is used internally by the **Parser** and related data classes (`PositionAware`).
@@ -79,7 +83,7 @@ This document describes the system architecture and key design patterns used in 
     - Accurate calculation of proceeds, cost basis, and gain/loss for each matched portion.
     - **Correct application of calculated gains/losses to the running balances of income/expense accounts.**
     - **Correct storage of detailed `CapitalGainResult` objects within the `BalanceSheet`.**
-    - **Robust error handling for problematic capital gains scenarios (now raising `ValueError`).**
+    - **Robust error handling for problematic capital gains scenarios (now using `ValueError` for most fatal issues and `Result` pattern for `_get_consolidated_proceeds`).**
 - Safe and reliable in-place modification of the journal file (future).
 - Designing a flexible and performant filtering engine.
 - Ensuring the caching mechanism provides significant performance improvements for large journals.
