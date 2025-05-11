@@ -68,6 +68,9 @@ This document tracks the progress, completed features, and remaining tasks for l
     - All 144 tests pass after these changes.
 - Refactored error handling in `_get_consolidated_proceeds` and `_process_asset_sale_capital_gains` in `src/balance.py` to use the `Result` pattern from the `returns` library. This includes introducing `ConsolidatedProceedsError`, `NoCashProceedsFoundError`, and `AmbiguousProceedsError` custom error types, eliminating the string-based check for "No cash proceeds found".
 - Refactored functions in `src/balance.py` (`Lot.try_create_from_posting`, `Account.get_account`, `BalanceSheet.get_account`) to use `Maybe[T]` from the `returns` library instead of `Optional[T]`. Updated all relevant test files to correctly handle the `Maybe` type and its assertions. All 144 tests pass (1 skipped).
+- Added `validate_internal_consistency` and `is_balanced` methods to the `Transaction` class in `src/classes.py`.
+- Defined custom error classes for transaction validation and balancing in `src/classes.py`.
+- Updated `memory-bank/context7_library_ids.md`.
 
 ## What's Left to Build
 
@@ -114,3 +117,4 @@ This document tracks the progress, completed features, and remaining tasks for l
 - Lot creation logic is now encapsulated in `Lot.try_create_from_posting`.
 - Error handling for proceeds consolidation in `src/balance.py` now uses the `Result` pattern with custom error types, making it more robust and explicit.
 - Optional return values in `src/balance.py` are now represented using `Maybe[T]` from the `returns` library, improving explicitness in handling potentially absent values.
+- Added methods to `Transaction` class for self-validation of internal consistency and balancing.

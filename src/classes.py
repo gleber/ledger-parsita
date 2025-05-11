@@ -17,6 +17,67 @@ from parsita import ParseError, ParserContext, Parser, Reader, lit, reg, rep, re
 from parsita.state import Continue, Input, Output, State # Import from parsita.state
 from parsita.util import splat # Import splat
 
+# Error types for Transaction validation and balancing
+class TransactionValidationError(Exception):
+    """Base class for transaction validation and balancing errors."""
+    pass
+
+class TransactionIntegrityError(TransactionValidationError):
+    """For issues with the basic structure or completeness of the Transaction object itself."""
+    pass
+
+class MissingDateError(TransactionIntegrityError):
+    def __init__(self, message: str = "Transaction date is missing or invalid."):
+        super().__init__(message)
+
+class MissingDescriptionError(TransactionIntegrityError):
+    def __init__(self, message: str = "Transaction payee/description is missing or empty."):
+        super().__init__(message)
+
+class InsufficientPostingsError(TransactionIntegrityError):
+    def __init__(self, message: str = "Transaction must have at least two postings."):
+        super().__init__(message)
+
+class InvalidPostingError(TransactionIntegrityError):
+    def __init__(self, message: str):
+        super().__init__(message)
+
+class TransactionBalanceError(TransactionValidationError):
+    """For issues related to the sum of posting amounts."""
+    pass
+
+class ImbalanceError(TransactionBalanceError):
+    def __init__(self, commodity: "Commodity", balance_sum: Decimal):
+        self.commodity = commodity
+        self.balance_sum = balance_sum
+        super().__init__(f"Transaction does not balance for commodity {commodity}. Sum is {balance_sum}.")
+
+class AmbiguousElidedAmountError(TransactionBalanceError):
+    def __init__(self, commodity: "Commodity"):
+        self.commodity = commodity
+        super().__init__(f"More than one elided amount for commodity {commodity}, cannot infer balance.")
+
+class UnresolvedElidedAmountError(TransactionBalanceError):
+    def __init__(self, commodity: "Commodity"):
+        self.commodity = commodity
+        super().__init__(f"Cannot resolve elided amount for commodity {commodity}.")
+
+class NoCommoditiesElidedError(TransactionBalanceError):
+    def __init__(self, message: str = "Cannot resolve elided amount as no commodities are present in the transaction."):
+        super().__init__(message)
+
+class MultipleCommoditiesRemainingError(TransactionBalanceError):
+    def __init__(self, commodities: List["Commodity"], message: str = None):
+        self.commodities = commodities
+        if message is None:
+            if commodities:
+                commodity_str = ", ".join(str(c) for c in commodities)
+                message = f"Cannot resolve remaining elided amounts due to multiple commodities present: {commodity_str}."
+            else:
+                message = "Cannot resolve remaining elided amounts due to multiple commodities present in the transaction."
+        super().__init__(message)
+
+
 CASH_TICKERS = ["USD", "PLN", "EUR"]
 CRYPTO_TICKERS = ["BTC", "ETH", "XRP", "LTC", "BCH", "ADA", "DOT", "UNI", "LINK", "SOL", "PseudoUSD", "BUSD", "FDUSD", "USDT", "USDC", "FTM", "ALGO"]
 SIMPLE_CURRENCIES = ["$"]
@@ -577,6 +638,139 @@ class Transaction(PositionAware["Transaction"]):
             return Amount(cost_basis_per_unit_value, cost_basis_posting.amount.commodity)
         else:
             return None # Handle zero quantity acquisition
+
+    def validate_internal_consistency(self) -> Result[None, TransactionIntegrityError]:
+        """
+        Checks if the Transaction object has all its essential components present and in a basic valid state.
+        Assumes the transaction is already parsed.
+        """
+        if not isinstance(self.date, date): # datetime.date, not datetime.datetime specifically
+            return Failure(MissingDateError())
+
+        if isinstance(self.payee, str) and not self.payee.strip():
+            return Failure(MissingDescriptionError())
+        elif not isinstance(self.payee, (str, AccountName)): # Should be str or AccountName
+             return Failure(MissingDescriptionError("Transaction payee/description has invalid type."))
+
+
+        if len(self.postings) < 2:
+            return Failure(InsufficientPostingsError())
+
+        for i, p in enumerate(self.postings):
+            if not isinstance(p, Posting):
+                return Failure(InvalidPostingError(f"Item at index {i} in postings is not a Posting object."))
+            if not isinstance(p.account, AccountName):
+                return Failure(InvalidPostingError(f"Posting {i} has an invalid account type: {type(p.account)}."))
+            if p.amount is not None: # Amount can be None for elided amounts
+                if not isinstance(p.amount, Amount):
+                    return Failure(InvalidPostingError(f"Posting {i} has an invalid amount type: {type(p.amount)}."))
+                if not isinstance(p.amount.quantity, Decimal):
+                     return Failure(InvalidPostingError(f"Posting {i} amount quantity is not a Decimal: {type(p.amount.quantity)}."))
+                if not isinstance(p.amount.commodity, Commodity):
+                     return Failure(InvalidPostingError(f"Posting {i} amount commodity is not a Commodity: {type(p.amount.commodity)}."))
+            # Further checks for cost, balance, etc., could be added if they are non-optional or have specific type requirements
+            # For now, focusing on account and amount (if present) as per the plan.
+        return Success(None)
+
+    def is_balanced(self) -> Result[None, TransactionBalanceError]:
+        """
+        Checks if the transaction's postings sum to zero for each commodity,
+        after attempting to infer elided amounts for postings without specified amounts.
+        Does not handle balance assignments that require external context (prior balances).
+        """
+        commodity_sums: Dict[Commodity, Decimal] = defaultdict(Decimal)
+        postings_with_amounts: List[Tuple[Posting, Amount]] = []  # To store postings with resolved amounts
+
+        # First pass: sum known amounts and identify elided postings
+        for posting in self.postings:
+            if posting.amount is not None:
+                if not isinstance(posting.amount, Amount) or not isinstance(posting.amount.commodity, Commodity) or not isinstance(posting.amount.quantity, Decimal):
+                    # This should ideally be caught by validate_internal_consistency, but good to be defensive
+                    return Failure(InvalidPostingError(f"Posting has malformed amount/commodity: {posting}"))  # type: ignore
+                commodity_sums[posting.amount.commodity] += posting.amount.quantity
+                postings_with_amounts.append((posting, posting.amount))
+
+        # Identify all unique commodities from postings that *do* have amounts
+        present_commodities = set(commodity_sums.keys())
+        elided_postings_unassigned: List[Posting] = [p for p in self.postings if p.amount is None]
+
+        if not elided_postings_unassigned:  # No elided amounts, just check sums
+            for comm, total_sum in commodity_sums.items():
+                if total_sum != Decimal(0):
+                    return Failure(ImbalanceError(comm, total_sum))
+            return Success(None)
+
+        # If there are elided postings, attempt to infer their amounts
+        # First, check if we can assign elided postings to imbalanced commodities
+        imbalanced_commodities = [comm for comm, total_sum in commodity_sums.items() if total_sum != Decimal(0)]
+        
+        if len(elided_postings_unassigned) > len(imbalanced_commodities):
+            # If we have more elided postings than imbalanced commodities, it's ambiguous which commodity
+            # the extra elided postings should balance, unless the commodities are already balanced.
+            if len(imbalanced_commodities) == 0 and len(elided_postings_unassigned) == 1:
+                # Special case: if all commodities are balanced and there's one elided posting,
+                # infer it as zero for the commodity of other postings if there's only one commodity.
+                if len(present_commodities) == 1:
+                    the_commodity = list(present_commodities)[0]
+                    elided_posting = elided_postings_unassigned.pop(0)
+                    inferred_amount = Amount(quantity=Decimal(0), commodity=the_commodity)
+                    postings_with_amounts.append((elided_posting, inferred_amount))
+                elif len(present_commodities) == 0:
+                    return Failure(NoCommoditiesElidedError())
+                else:
+                    return Failure(MultipleCommoditiesRemainingError(list(present_commodities)))
+            elif len(present_commodities) == 1:
+                the_commodity = list(present_commodities)[0]
+                if len(elided_postings_unassigned) > 1:
+                    return Failure(AmbiguousElidedAmountError(the_commodity))
+                else:
+                    return Failure(UnresolvedElidedAmountError(the_commodity))
+            else:
+                if len(present_commodities) == 0:
+                    return Failure(NoCommoditiesElidedError())
+                return Failure(MultipleCommoditiesRemainingError(list(present_commodities)))
+
+        # Assign elided postings to balance imbalanced commodities
+        for comm in imbalanced_commodities[:]:  # Iterate over a copy as we might modify elided_postings_unassigned
+            if not elided_postings_unassigned:
+                break  # All elided postings assigned
+
+            current_sum_for_comm = commodity_sums.get(comm, Decimal(0))
+            if current_sum_for_comm != Decimal(0):  # This commodity is imbalanced
+                # Assign one elided posting to balance this commodity
+                elided_posting = elided_postings_unassigned.pop(0)
+                inferred_amount = Amount(quantity=-current_sum_for_comm, commodity=comm)
+                postings_with_amounts.append((elided_posting, inferred_amount))
+                commodity_sums[comm] = Decimal(0)  # Now balanced for this commodity
+                imbalanced_commodities.remove(comm)  # Remove from imbalanced list
+
+        # If there are still unassigned elided postings
+        if elided_postings_unassigned:
+            if len(present_commodities) == 1:
+                the_commodity = list(present_commodities)[0]
+                if len(elided_postings_unassigned) == 1:  # And there's one elided posting left
+                    elided_posting = elided_postings_unassigned.pop(0)
+                    inferred_quantity = -commodity_sums.get(the_commodity, Decimal(0))
+                    inferred_amount = Amount(quantity=inferred_quantity, commodity=the_commodity)
+                    postings_with_amounts.append((elided_posting, inferred_amount))
+                    commodity_sums[the_commodity] += inferred_quantity  # Should be 0 now
+                else:
+                    return Failure(AmbiguousElidedAmountError(the_commodity))
+            elif len(present_commodities) == 0:
+                return Failure(NoCommoditiesElidedError())
+            else:
+                return Failure(MultipleCommoditiesRemainingError(list(present_commodities)))
+
+        # Final check of sums for all commodities involved (including those from inferred amounts)
+        final_commodity_sums: Dict[Commodity, Decimal] = defaultdict(Decimal)
+        for _, amount_obj in postings_with_amounts:
+            final_commodity_sums[amount_obj.commodity] += amount_obj.quantity
+
+        for comm, total_sum in final_commodity_sums.items():
+            if total_sum != Decimal(0):
+                return Failure(ImbalanceError(comm, total_sum))
+
+        return Success(None)
 
 
 @dataclass

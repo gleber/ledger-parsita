@@ -52,10 +52,11 @@ This document describes the system architecture and key design patterns used in 
 - Caching Pattern: Utilized (`src/classes.py:SourceCacheManager`) for optimizing source position lookups during parsing.
 - Result Pattern: Used with `returns.result.Result` (`Success`, `Failure`) for functions that can fail in predictable ways, such as `BalanceSheet._get_consolidated_proceeds`. This enhances error handling by making failure cases explicit and type-safe.
 - Maybe Pattern: Used with `returns.maybe.Maybe` (`Some`, `Nothing`) for functions that can return an optional value (e.g., `Lot.try_create_from_posting`, `Account.get_account`, `BalanceSheet.get_account`). This makes handling of potentially absent values more explicit.
+- Transaction Validation Pattern: The `Transaction` class in `src/classes.py` now includes methods (`validate_internal_consistency`, `is_balanced`) for checking its own integrity and balance based on its postings. This uses the `Result` pattern and custom error types (`TransactionIntegrityError`, `TransactionBalanceError` and their subtypes) for clear error reporting.
 
 ## Component Relationships
 
-- The Parser reads the journal file(s) and produces a `Journal` object containing `Transaction` and other entries.
+- The Parser reads the journal file(s) and produces a `Journal` object containing `Transaction` and other entries. Each `Transaction` object can now self-validate its internal consistency and whether its postings balance per commodity.
 - The `Journal` object is processed by `BalanceSheet.from_journal` (which internally uses `BalanceSheet.from_transactions` that iteratively calls `BalanceSheet.apply_transaction`).
 - The `BalanceSheet.apply_transaction` method:
     - Calls `_apply_direct_posting_effects` which uses `Lot.try_create_from_posting` to identify and create `Lot` objects.

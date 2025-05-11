@@ -114,6 +114,9 @@ This document outlines the current focus and active considerations for ledger-pa
     - All tests (144 passed, 1 skipped) pass after these refactorings.
 - Refactored error handling in `_get_consolidated_proceeds` and `_process_asset_sale_capital_gains` in `src/balance.py` to use `Result` pattern and custom error types (`NoCashProceedsFoundError`, `AmbiguousProceedsError`). This eliminates the string-based check for "No cash proceeds found".
 - Refactored functions in `src/balance.py` (`Lot.try_create_from_posting`, `Account.get_account`, `BalanceSheet.get_account`) to use `Maybe[T]` from the `returns` library instead of `Optional[T]`. Updated all relevant test files to correctly handle the `Maybe` type and its assertions. All 144 tests pass (1 skipped).
+- Added `validate_internal_consistency` and `is_balanced` methods to the `Transaction` class in `src/classes.py` for validating individual transaction integrity and balance.
+- Defined custom error classes (`TransactionValidationError`, `TransactionIntegrityError`, `MissingDateError`, `MissingDescriptionError`, `InsufficientPostingsError`, `InvalidPostingError`, `TransactionBalanceError`, `ImbalanceError`, `AmbiguousElidedAmountError`, `UnresolvedElidedAmountError`) in `src/classes.py`.
+- Updated `memory-bank/context7_library_ids.md` with the ID for `plaintextaccounting`.
 
 ## Next Steps
 
@@ -142,6 +145,7 @@ Phase 2: Future Steps
 - Proceeds identification in `BalanceSheet._get_consolidated_proceeds` now excludes `expenses:` and `income:` accounts, rather than requiring specific `assets:cash/bank` or `liabilities` accounts.
 - Error handling for proceeds consolidation now uses the `Result` pattern with custom error types (`NoCashProceedsFoundError`, `AmbiguousProceedsError`) for better type safety and clarity.
 - Optional return values in `src/balance.py` are now represented using `Maybe[T]` from the `returns` library, improving explicitness in handling potentially absent values.
+- Transaction validation and balancing logic is being added to the `Transaction` class itself for checks that don't require external journal context.
 
 ## Important Patterns and Preferences
 
