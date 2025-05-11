@@ -20,7 +20,7 @@ This document details the technologies, development setup, and dependencies for 
 - `parsita` is used for parsing.
 - `returns` is used for error handling.
 - `pytest` is used for testing.
-- **No new major dependencies are anticipated for the initial capital gains tracking implementation, building on existing libraries.**
+- No new major dependencies are anticipated for the initial capital gains tracking implementation, building on existing libraries.
 
 ## Tool Usage Patterns
 
@@ -29,7 +29,7 @@ This document details the technologies, development setup, and dependencies for 
 - When debugging and fixing tests, when a failure is observed ALWAYS test just a single test with command like `python3 -m pytest tests/test_hledger_parser.py::test_journal_and_entities_have_source_location`. Always fix tests one by one. Each fix should be small.
 - Always re-run a single test AFTER EVERY SINGLE CODE MODIFICATION! If not sure which test to run, run all of them.
 - Use `black` and `isort` for code formatting.
-- **The `gains` CLI command has been added for capital gains reporting. Other CLI commands related to capital gains (e.g., for journal updates) may be added in the future.**
+- The `gains` CLI command has been added for capital gains reporting. Other CLI commands related to capital gains (e.g., for journal updates) may be added in the future.
 
 ## Library Documentation
 
