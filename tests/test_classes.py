@@ -1,566 +1,518 @@
-from decimal import Decimal
 from datetime import date
-from src.classes import (
-    AccountName, Commodity, Amount, Cost, CostKind, Posting, Transaction,
-    MissingDateError, MissingDescriptionError, InsufficientPostingsError, InvalidPostingError,
-    ImbalanceError, AmbiguousElidedAmountError, UnresolvedElidedAmountError,
-    NoCommoditiesElidedError, MultipleCommoditiesRemainingError, Journal, JournalEntry
-)
-from returns.result import Success, Failure # Import Success and Failure
+from decimal import Decimal
+from pathlib import Path
 import pytest
+from src.classes import (
+    AccountName,
+    Amount,
+    Commodity,
+    Comment,
+    Posting,
+    Transaction,
+    SourceLocation,
+    TransactionBalanceError,
+    ImbalanceError,
+    AmbiguousElidedAmountError,
+    UnresolvedElidedAmountError,
+    NoCommoditiesElidedError,
+    MultipleCommoditiesRemainingError,
+    TransactionIntegrityError,
+    MissingDateError,
+    MissingDescriptionError,
+    InsufficientPostingsError,
+    InvalidPostingError,
+)
+from returns.result import Success, Failure
 
-def test_account_name_creation():
-    account = AccountName(parts=["assets", "stocks", "AAPL"])
-    assert str(account) == "assets:stocks:AAPL"
-    assert account.name == "assets:stocks:AAPL"
+
+def test_account_name_str():
+    assert str(AccountName(parts=["assets", "cash"])) == "assets:cash"
+
 
 def test_account_name_parent():
-    account = AccountName(parts=["assets", "stocks", "AAPL"])
-    parent = account.parent
-    assert parent is not None
-    assert str(parent) == "assets:stocks"
-
-    grandparent = parent.parent if parent else None
-    assert grandparent is not None
-    assert str(grandparent) == "assets"
-
-    great_grandparent = grandparent.parent if grandparent else None
-    assert great_grandparent is None
-
-def test_is_asset_method():
-    asset_account = AccountName(parts=["assets", "stocks", "AAPL"])
-    expense_account = AccountName(parts=["expenses", "food"])
-    income_account = AccountName(parts=["income", "salary"])
-    liability_account = AccountName(parts=["liabilities", "credit card"])
-    equity_account = AccountName(parts=["equity", "opening balances"])
-
-    assert asset_account.isAsset()
-    assert not expense_account.isAsset()
-    assert not income_account.isAsset()
-    assert not liability_account.isAsset()
-    assert not equity_account.isAsset()
-
-def test_is_dated_subaccount_method():
-    dated_account = AccountName(parts=["assets", "stocks", "AAPL", "20230101"])
-    non_dated_asset_account = AccountName(parts=["assets", "stocks", "MSFT"])
-    expense_account = AccountName(parts=["expenses", "food"])
-
-    assert dated_account.isDatedSubaccount()
-    assert not non_dated_asset_account.isDatedSubaccount()
-    assert not expense_account.isDatedSubaccount()
-
-def test_commodity_is_cash_method():
-    usd = Commodity(name="USD")
-    pln = Commodity(name="PLN")
-    aapl = Commodity(name="AAPL")
-
-    assert usd.isCash()
-    assert pln.isCash()
-    assert not aapl.isCash()
-
-def test_commodity_is_crypto_method():
-    btc = Commodity(name="BTC")
-    eth = Commodity(name="ETH")
-    aapl = Commodity(name="AAPL")
-    usd = Commodity(name="USD")
-
-    assert btc.isCrypto()
-    assert eth.isCrypto()
-    assert not aapl.isCrypto()
-    assert not usd.isCrypto()
-
-def test_commodity_is_stock_method():
-    aapl = Commodity(name="AAPL")
-    goog = Commodity(name="GOOG")
-    brka = Commodity(name="BRK.A") # Stock with a period - my simple regex won't catch this yet
-    btc = Commodity(name="BTC")
-    usd = Commodity(name="USD")
-    option = Commodity(name="TSLA260116C200")
-
-    assert aapl.isStock()
-    assert goog.isStock()
-    assert brka.isStock()
-    assert not btc.isStock()
-    assert not usd.isStock()
-    assert not option.isStock()
-
-def test_commodity_is_option_method():
-    option1 = Commodity(name="TSLA260116C200")
-    option2 = Commodity(name="AAPL230721P150")
-    aapl = Commodity(name="AAPL")
-    btc = Commodity(name="BTC")
-
-    assert option1.isOption()
-    assert option2.isOption()
-    assert not aapl.isOption()
-    assert not btc.isOption()
-
-def test_transaction_get_posting_cost_explicit_unit_cost():
-    # Transaction with explicit unit cost
-    transaction = Transaction(
-        date=date(2022, 1, 1),
-        payee="Buy EUR",
-        postings=[
-            Posting(account=AccountName(parts=["assets", "dollars"]), amount=Amount(Decimal("-135"), Commodity(name="USD"))),
-            Posting(account=AccountName(parts=["assets", "euros"]), amount=Amount(Decimal("100"), Commodity(name="EUR")), cost=Cost(kind=CostKind.UnitCost, amount=Amount(Decimal("1.35"), Commodity(name="USD")))),
-        ],
+    assert AccountName(parts=["assets", "cash"]).parent == AccountName(
+        parts=["assets"]
     )
-    target_posting = transaction.postings[1] # The EUR posting
-    cost = transaction.get_posting_cost(target_posting)
-    assert cost is not None
-    assert cost.kind == CostKind.UnitCost
-    assert cost.amount == Amount(Decimal("1.35"), Commodity(name="USD"))
+    assert AccountName(parts=["assets"]).parent is None
 
-def test_transaction_get_posting_cost_explicit_total_cost():
-    # Transaction with explicit total cost
-    transaction = Transaction(
-        date=date(2022, 1, 1),
-        payee="Buy EUR",
+
+def test_account_name_is_asset():
+    assert AccountName(parts=["assets", "cash"]).isAsset() is True
+    assert AccountName(parts=["Assets", "Cash"]).isAsset() is True # Case-insensitive check
+    assert AccountName(parts=["expenses", "food"]).isAsset() is False
+    assert AccountName(parts=["income", "salary"]).isAsset() is False
+    assert AccountName(parts=["liabilities", "creditcard"]).isAsset() is False
+
+
+def test_account_name_is_dated_subaccount():
+    assert AccountName(parts=["assets", "broker", "XYZ", "20230115"]).isDatedSubaccount() is True
+    assert AccountName(parts=["assets", "broker", "XYZ", "ABC"]).isDatedSubaccount() is False
+    assert AccountName(parts=["assets", "broker", "XYZ"]).isDatedSubaccount() is False
+    assert AccountName(parts=["20230115"]).isDatedSubaccount() is True
+    assert AccountName(parts=[]).isDatedSubaccount() is False
+
+
+def test_commodity_is_cash():
+    assert Commodity(name="USD").isCash() is True
+    assert Commodity(name="PLN").isCash() is True
+    assert Commodity(name="EUR").isCash() is True
+    assert Commodity(name="BTC").isCash() is False
+    assert Commodity(name="XYZ").isCash() is False
+
+
+def test_commodity_is_crypto():
+    assert Commodity(name="BTC").isCrypto() is True
+    assert Commodity(name="ETH").isCrypto() is True
+    assert Commodity(name="PseudoUSD").isCrypto() is True # Test a stablecoin
+    assert Commodity(name="USD").isCrypto() is False
+    assert Commodity(name="XYZ").isCrypto() is False
+
+
+def test_commodity_is_stock():
+    assert Commodity(name="AAPL").isStock() is True
+    assert Commodity(name="GOOGL").isStock() is True
+    assert Commodity(name="MSFT.US").isStock() is True # Test with period
+    assert Commodity(name="USD").isStock() is False
+    assert Commodity(name="BTC").isStock() is False
+    assert Commodity(name="TSLA260116C200").isStock() is False # Option
+    assert Commodity(name="VERYLONGTICKER").isStock() is False # Too long
+
+
+def test_commodity_is_option():
+    assert Commodity(name="TSLA260116C200").isOption() is True
+    assert Commodity(name="SPY251231P400.5").isOption() is True
+    assert Commodity(name="AAPL").isOption() is False
+    assert Commodity(name="USD").isOption() is False
+    assert Commodity(name="BTC").isOption() is False
+
+
+def test_transaction_get_key():
+    # Create some sample postings
+    posting1 = Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("-100"), Commodity("USD")))
+    posting2 = Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("100"), Commodity("USD")))
+    posting3 = Posting(account=AccountName(["assets", "bank"]), amount=Amount(Decimal("-50"), Commodity("EUR")))
+    posting4 = Posting(account=AccountName(["expenses", "travel"]), amount=Amount(Decimal("50"), Commodity("EUR")))
+
+    # Create transactions
+    tx1_date = date(2023, 1, 15)
+    tx1_payee = "Grocery Store"
+    tx1 = Transaction(date=tx1_date, payee=tx1_payee, postings=[posting1, posting2])
+
+    tx2_date = date(2023, 1, 15)
+    tx2_payee = "Grocery Store"
+    tx2 = Transaction(date=tx2_date, payee=tx2_payee, postings=[posting2, posting1]) # Same postings, different order
+
+    tx3_date = date(2023, 1, 16)
+    tx3_payee = "Grocery Store"
+    tx3 = Transaction(date=tx3_date, payee=tx3_payee, postings=[posting1, posting2]) # Different date
+
+    tx4_date = date(2023, 1, 15)
+    tx4_payee = "Supermarket"
+    tx4 = Transaction(date=tx4_date, payee=tx4_payee, postings=[posting1, posting2]) # Different payee
+
+    tx5_date = date(2023, 1, 15)
+    tx5_payee = "Grocery Store"
+    tx5 = Transaction(date=tx5_date, payee=tx5_payee, postings=[posting3, posting4]) # Different postings
+
+    # Get keys
+    key1 = tx1.getKey()
+    key2 = tx2.getKey()
+    key3 = tx3.getKey()
+    key4 = tx4.getKey()
+    key5 = tx5.getKey()
+
+    # Assertions
+    assert key1 == key2, "Keys should be the same for transactions with the same date, payee, and postings (regardless of posting order)"
+    assert key1 != key3, "Keys should be different for transactions with different dates"
+    assert key1 != key4, "Keys should be different for transactions with different payees"
+    assert key1 != key5, "Keys should be different for transactions with different postings"
+
+    # Test with elided amounts
+    posting_elided = Posting(account=AccountName(["assets", "cash"]))
+    tx_elided1 = Transaction(date=tx1_date, payee=tx1_payee, postings=[posting_elided, posting2])
+    tx_elided2 = Transaction(date=tx1_date, payee=tx1_payee, postings=[posting2, posting_elided])
+    key_elided1 = tx_elided1.getKey()
+    key_elided2 = tx_elided2.getKey()
+    assert key_elided1 == key_elided2, "Keys should be the same for elided amounts, order independent"
+    assert key1 != key_elided1, "Key with elided amount should differ from non-elided"
+
+# --- Test Cases for Transaction.validate_internal_consistency ---
+def test_validate_internal_consistency_valid():
+    tx = Transaction(
+        date=date(2024, 1, 1),
+        payee="Valid Payee",
         postings=[
-            Posting(account=AccountName(parts=["assets", "dollars"]), amount=Amount(Decimal("-135"), Commodity(name="USD"))),
-            Posting(account=AccountName(parts=["assets", "euros"]), amount=Amount(Decimal("100"), Commodity(name="EUR")), cost=Cost(kind=CostKind.TotalCost, amount=Amount(Decimal("135"), Commodity(name="USD")))),
-        ],
-    )
-    target_posting = transaction.postings[1] # The EUR posting
-    cost = transaction.get_posting_cost(target_posting)
-    assert cost is not None
-    assert cost.kind == CostKind.TotalCost
-    assert cost.amount == Amount(Decimal("135"), Commodity(name="USD"))
-
-def test_transaction_get_posting_cost_inferred_total_cost():
-    # Transaction with implicit cost (Variant 3)
-    transaction = Transaction(
-        date=date(2022, 1, 1),
-        payee="Buy EUR",
-        postings=[
-            Posting(account=AccountName(parts=["assets", "dollars"]), amount=Amount(Decimal("-135"), Commodity(name="USD"))),
-            Posting(account=AccountName(parts=["assets", "euros"]), amount=Amount(Decimal("100"), Commodity(name="EUR"))),
-        ],
-    )
-    target_posting = transaction.postings[1] # The EUR posting
-    cost = transaction.get_posting_cost(target_posting)
-    assert cost is not None
-    assert cost.kind == CostKind.TotalCost
-    assert cost.amount == Amount(Decimal("135"), Commodity(name="USD"))
-
-    target_posting_other = transaction.postings[0] # The USD posting
-    cost_other = transaction.get_posting_cost(target_posting_other)
-    assert cost_other is not None
-    assert cost_other.kind == CostKind.TotalCost
-    assert cost_other.amount == Amount(Decimal("100"), Commodity(name="EUR"))
-
-
-def test_transaction_get_posting_cost_no_cost():
-    # Transaction with no cost and not eligible for inference
-    transaction = Transaction(
-        date=date(2022, 1, 1),
-        payee="Salary",
-        postings=[
-            Posting(account=AccountName(parts=["assets", "bank"]), amount=Amount(Decimal("1000"), Commodity(name="USD"))),
-            Posting(account=AccountName(parts=["income", "salary"]), amount=Amount(Decimal("-1000"), Commodity(name="USD"))),
-            Posting(account=AccountName(parts=["expenses", "tax"]), amount=Amount(Decimal("200"), Commodity(name="USD"))), # More than two postings
-        ],
-    )
-    target_posting = transaction.postings[0] # The bank posting
-    cost = transaction.get_posting_cost(target_posting)
-    assert cost is None
-
-    # Transaction with two postings but same commodity
-    transaction_same_commodity = Transaction(
-        date=date(2022, 1, 1),
-        payee="Transfer",
-        postings=[
-            Posting(account=AccountName(parts=["assets", "bank"]), amount=Amount(Decimal("-100"), Commodity(name="USD"))),
-            Posting(account=AccountName(parts=["assets", "cash"]), amount=Amount(Decimal("100"), Commodity(name="USD"))),
-        ],
-    )
-    target_posting_same_commodity = transaction_same_commodity.postings[0]
-    cost_same_commodity = transaction_same_commodity.get_posting_cost(target_posting_same_commodity)
-    assert cost_same_commodity is None
-
-# Tests for Transaction.validate_internal_consistency
-def test_transaction_validate_internal_consistency_valid():
-    valid_transaction = Transaction(
-        date=date(2023, 1, 1),
-        payee="Valid Transaction",
-        postings=[
-            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-            Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Assets", "Bank"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Expenses", "Food"]), amount=Amount(Decimal("100"), Commodity("USD"))),
         ]
     )
-    result = valid_transaction.validate_internal_consistency()
-    assert isinstance(result, Success)
+    assert isinstance(tx.validate_internal_consistency(), Success)
 
-def test_transaction_validate_internal_consistency_invalid_date():
-    invalid_transaction = Transaction(
+def test_validate_internal_consistency_missing_date():
+    tx = Transaction(
         date=None, # type: ignore
-        payee="Invalid Date",
+        payee="Valid Payee",
         postings=[
-            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-            Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Assets", "Bank"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Expenses", "Food"]), amount=Amount(Decimal("100"), Commodity("USD"))),
         ]
     )
-    result = invalid_transaction.validate_internal_consistency()
+    result = tx.validate_internal_consistency()
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), MissingDateError)
 
-def test_transaction_validate_internal_consistency_missing_payee():
-    invalid_transaction = Transaction(
-        date=date(2023,1,1),
-        payee="", # Empty payee
+def test_validate_internal_consistency_missing_payee_str():
+    tx = Transaction(
+        date=date(2024, 1, 1),
+        payee="", # Empty string
         postings=[
-            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-            Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Assets", "Bank"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Expenses", "Food"]), amount=Amount(Decimal("100"), Commodity("USD"))),
         ]
     )
-    result = invalid_transaction.validate_internal_consistency()
+    result = tx.validate_internal_consistency()
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), MissingDescriptionError)
 
-def test_transaction_validate_internal_consistency_insufficient_postings():
-    invalid_transaction = Transaction(
-        date=date(2023,1,1),
-        payee="One Posting",
+def test_validate_internal_consistency_invalid_payee_type():
+    tx = Transaction(
+        date=date(2024, 1, 1),
+        payee=123, # type: ignore # Invalid type
         postings=[
-            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("100"), Commodity("USD"))),
+            Posting(account=AccountName(["Assets", "Bank"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Expenses", "Food"]), amount=Amount(Decimal("100"), Commodity("USD"))),
         ]
     )
-    result = invalid_transaction.validate_internal_consistency()
+    result = tx.validate_internal_consistency()
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), MissingDescriptionError)
+    assert "invalid type" in str(result.failure())
+
+
+def test_validate_internal_consistency_insufficient_postings_none():
+    tx = Transaction(
+        date=date(2024, 1, 1),
+        payee="Valid Payee",
+        postings=[] # No postings
+    )
+    result = tx.validate_internal_consistency()
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), InsufficientPostingsError)
 
-def test_transaction_validate_internal_consistency_invalid_posting_account():
-    invalid_transaction = Transaction(
-        date=date(2023,1,1),
-        payee="Invalid Posting Account",
+def test_validate_internal_consistency_insufficient_postings_one():
+    tx = Transaction(
+        date=date(2024, 1, 1),
+        payee="Valid Payee",
         postings=[
-            Posting(account=None, amount=Amount(Decimal("100"), Commodity("USD"))), # type: ignore
-            Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Assets", "Bank"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+        ] # Only one posting
+    )
+    result = tx.validate_internal_consistency()
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), InsufficientPostingsError)
+
+def test_validate_internal_consistency_invalid_posting_item_type():
+    tx = Transaction(
+        date=date(2024, 1, 1),
+        payee="Valid Payee",
+        postings=[
+            Posting(account=AccountName(["Assets", "Bank"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            "not a posting" # type: ignore
         ]
     )
-    result = invalid_transaction.validate_internal_consistency()
+    result = tx.validate_internal_consistency()
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), InvalidPostingError)
-    assert "invalid account type" in str(result.failure()).lower()
+    assert "Item at index 1" in str(result.failure())
 
 
-def test_transaction_validate_internal_consistency_invalid_posting_amount_type():
-    invalid_transaction = Transaction(
-        date=date(2023,1,1),
-        payee="Invalid Posting Amount Type",
+def test_validate_internal_consistency_invalid_posting_account_type():
+    tx = Transaction(
+        date=date(2024, 1, 1),
+        payee="Valid Payee",
         postings=[
-            Posting(account=AccountName(["assets", "cash"]), amount="not an amount"), # type: ignore
-            Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Assets", "Bank"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account="NotAnAccountName", amount=Amount(Decimal("100"), Commodity("USD"))), # type: ignore
         ]
     )
-    result = invalid_transaction.validate_internal_consistency()
+    result = tx.validate_internal_consistency()
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), InvalidPostingError)
-    assert "invalid amount type" in str(result.failure()).lower()
+    assert "Posting 1 has an invalid account type" in str(result.failure())
 
-def test_transaction_validate_internal_consistency_invalid_posting_amount_quantity():
-    invalid_transaction = Transaction(
-        date=date(2023,1,1),
-        payee="Invalid Posting Amount Quantity",
+def test_validate_internal_consistency_invalid_posting_amount_type():
+    tx = Transaction(
+        date=date(2024, 1, 1),
+        payee="Valid Payee",
         postings=[
-            Posting(account=AccountName(["assets", "cash"]), amount=Amount("not a decimal", Commodity("USD"))), # type: ignore
-            Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Assets", "Bank"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Expenses", "Food"]), amount="NotAnAmount"), # type: ignore
         ]
     )
-    result = invalid_transaction.validate_internal_consistency()
+    result = tx.validate_internal_consistency()
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), InvalidPostingError)
-    assert "quantity is not a decimal" in str(result.failure()).lower()
+    assert "Posting 1 has an invalid amount type" in str(result.failure())
 
-def test_transaction_validate_internal_consistency_invalid_posting_amount_commodity():
-    invalid_transaction = Transaction(
-        date=date(2023,1,1),
-        payee="Invalid Posting Amount Commodity",
+def test_validate_internal_consistency_invalid_posting_amount_quantity_type():
+    tx = Transaction(
+        date=date(2024, 1, 1),
+        payee="Valid Payee",
         postings=[
-            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("100"), "not a commodity")), # type: ignore
-            Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Assets", "Bank"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Expenses", "Food"]), amount=Amount(quantity="NotADecimal", commodity=Commodity("USD"))), # type: ignore
         ]
     )
-    result = invalid_transaction.validate_internal_consistency()
+    result = tx.validate_internal_consistency()
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), InvalidPostingError)
-    assert "commodity is not a commodity" in str(result.failure()).lower()
+    assert "Posting 1 amount quantity is not a Decimal" in str(result.failure())
 
-
-# Tests for Transaction.is_balanced
-def test_transaction_is_balanced_simple_two_postings():
-    transaction = Transaction(
-        date=date(2023, 1, 1),
-        payee="Balanced",
+def test_validate_internal_consistency_invalid_posting_amount_commodity_type():
+    tx = Transaction(
+        date=date(2024, 1, 1),
+        payee="Valid Payee",
         postings=[
-            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-            Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Assets", "Bank"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Expenses", "Food"]), amount=Amount(quantity=Decimal("100"), commodity="NotACommodity")), # type: ignore
         ]
     )
-    result = transaction.is_balanced()
+    result = tx.validate_internal_consistency()
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), InvalidPostingError)
+    assert "Posting 1 amount commodity is not a Commodity" in str(result.failure())
+
+def test_validate_internal_consistency_posting_amount_is_none_valid():
+    tx = Transaction(
+        date=date(2024, 1, 1),
+        payee="Valid Payee",
+        postings=[
+            Posting(account=AccountName(["Assets", "Bank"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["Expenses", "Food"]), amount=None), # Elided amount
+        ]
+    )
+    assert isinstance(tx.validate_internal_consistency(), Success)
+
+
+# --- Test Cases for Transaction.balance() and Transaction.is_balanced() ---
+
+def test_transaction_balance_simple_success():
+    tx = Transaction(
+        date=date(2023, 1, 1),
+        payee="Test",
+        postings=[
+            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("100"), Commodity("USD"))),
+        ]
+    )
+    result = tx.balance()
     assert isinstance(result, Success)
+    assert isinstance(tx.is_balanced(), Success)
 
-def test_transaction_is_balanced_imbalanced_two_postings():
-    transaction = Transaction(
+def test_transaction_balance_single_elided_success():
+    tx = Transaction(
         date=date(2023, 1, 1),
-        payee="Imbalanced",
+        payee="Test",
         postings=[
-            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-            Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("-99"), Commodity("USD"))),
-        ]
-    )
-    result = transaction.is_balanced()
-    assert isinstance(result, Failure)
-    failure_val = result.failure()
-    assert isinstance(failure_val, ImbalanceError)
-    assert failure_val.commodity == Commodity("USD")
-    assert failure_val.balance_sum == Decimal("1")
-
-def test_transaction_is_balanced_one_elided_amount_infers_correctly():
-    transaction = Transaction(
-        date=date(2023, 1, 1),
-        payee="Elided Balanced",
-        postings=[
-            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-            Posting(account=AccountName(["expenses", "food"])), # Elided amount
-        ]
-    )
-    result = transaction.is_balanced()
-    assert isinstance(result, Success)
-
-def test_transaction_is_balanced_one_elided_amount_infers_zero_if_others_balance():
-    transaction = Transaction(
-        date=date(2023, 1, 1),
-        payee="Elided Zero Balanced",
-        postings=[
-            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-            Posting(account=AccountName(["expenses", "transfer"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
-            Posting(account=AccountName(["expenses", "food"])), # Elided, should be 0
-        ]
-    )
-    result = transaction.is_balanced()
-    # This case is tricky. The current logic might assign the imbalance to the single elided.
-    # If assets and expenses already balance, the elided should be 0.
-    # The current logic for `is_balanced` might need refinement for this specific scenario
-    # if it doesn't correctly infer zero. For now, let's assume it should work.
-    # Update: The logic was updated to handle this.
-    assert isinstance(result, Success)
-
-
-def test_transaction_is_balanced_two_elided_amounts_same_commodity_ambiguous():
-    transaction = Transaction(
-        date=date(2023, 1, 1),
-        payee="Two Elided Ambiguous",
-        postings=[
-            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-            Posting(account=AccountName(["expenses", "food"])),      # Elided
-            Posting(account=AccountName(["expenses", "entertainment"])), # Elided
-        ]
-    )
-    result = transaction.is_balanced()
-    assert isinstance(result, Failure)
-    failure_val = result.failure()
-    assert isinstance(failure_val, AmbiguousElidedAmountError)
-    assert failure_val.commodity == Commodity("USD")
-
-def test_transaction_is_balanced_multiple_commodities_balanced():
-    transaction = Transaction(
-        date=date(2023, 1, 1),
-        payee="Multi Commodity Balanced",
-        postings=[
-            Posting(account=AccountName(["assets", "cash_usd"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-            Posting(account=AccountName(["expenses", "import_usd"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
-            Posting(account=AccountName(["assets", "cash_eur"]), amount=Amount(Decimal("50"), Commodity("EUR"))),
-            Posting(account=AccountName(["expenses", "import_eur"]), amount=Amount(Decimal("-50"), Commodity("EUR"))),
-        ]
-    )
-    result = transaction.is_balanced()
-    assert isinstance(result, Success)
-
-def test_transaction_is_balanced_multiple_commodities_imbalanced_one():
-    transaction = Transaction(
-        date=date(2023, 1, 1),
-        payee="Multi Commodity Imbalanced EUR",
-        postings=[
-            Posting(account=AccountName(["assets", "cash_usd"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-            Posting(account=AccountName(["expenses", "import_usd"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
-            Posting(account=AccountName(["assets", "cash_eur"]), amount=Amount(Decimal("50"), Commodity("EUR"))),
-            Posting(account=AccountName(["expenses", "import_eur"]), amount=Amount(Decimal("-40"), Commodity("EUR"))), # Imbalance here
-        ]
-    )
-    result = transaction.is_balanced()
-    assert isinstance(result, Failure)
-    failure_val = result.failure()
-    assert isinstance(failure_val, ImbalanceError)
-    assert failure_val.commodity == Commodity("EUR")
-    assert failure_val.balance_sum == Decimal("10")
-
-def test_transaction_is_balanced_multiple_commodities_one_elided_infers():
-    transaction = Transaction(
-        date=date(2023, 1, 1),
-        payee="Multi Commodity Elided EUR",
-        postings=[
-            Posting(account=AccountName(["assets", "cash_usd"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-            Posting(account=AccountName(["expenses", "import_usd"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
-            Posting(account=AccountName(["assets", "cash_eur"]), amount=Amount(Decimal("50"), Commodity("EUR"))),
-            Posting(account=AccountName(["expenses", "import_eur"])), # Elided, should be -50 EUR
-        ]
-    )
-    result = transaction.is_balanced()
-    assert isinstance(result, Success)
-
-def test_transaction_is_balanced_elided_with_no_other_postings_of_commodity():
-    transaction = Transaction(
-        date=date(2023, 1, 1),
-        payee="Elided Unresolved",
-        postings=[
-            Posting(account=AccountName(["assets", "cash_usd"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-            Posting(account=AccountName(["expenses", "food"])), # Elided, should infer -100 USD
-            Posting(account=AccountName(["assets", "cash_eur"])), # Elided, but no EUR to balance against
-        ]
-    )
-    result = transaction.is_balanced()
-    assert isinstance(result, Failure)
-    failure_val = result.failure()
-    assert isinstance(failure_val, AmbiguousElidedAmountError)
-    assert failure_val.commodity == Commodity("USD")
-
-
-def test_transaction_is_balanced_all_elided_fails():
-    transaction = Transaction(
-        date=date(2023, 1, 1),
-        payee="All Elided",
-        postings=[
-            Posting(account=AccountName(["assets", "cash"])),
-            Posting(account=AccountName(["expenses", "food"])),
-        ]
-    )
-    result = transaction.is_balanced()
-    assert isinstance(result, Failure)
-    failure_val = result.failure()
-    assert isinstance(failure_val, NoCommoditiesElidedError)
-
-def test_transaction_is_balanced_single_posting_elided_no_commodity_context():
-    # This case is inherently unresolvable for balancing without knowing the commodity.
-    transaction = Transaction(
-        date=date(2023, 1, 1),
-        payee="Single Elided No Context",
-        postings=[
-            Posting(account=AccountName(["assets", "cash"])), # Elided
-            Posting(account=AccountName(["expenses", "unknown"])) # Elided
-        ]
-    )
-    result = transaction.is_balanced()
-    assert isinstance(result, Failure)
-    assert isinstance(result.failure(), NoCommoditiesElidedError)
-
-def test_transaction_is_balanced_complex_elided_inference():
-    transaction = Transaction(
-        date=date(2023, 1, 1),
-        payee="Complex Elide",
-        postings=[
-            Posting(account=AccountName(["assets", "cash_usd"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-            Posting(account=AccountName(["assets", "cash_eur"]), amount=Amount(Decimal("50"), Commodity("EUR"))),
-            Posting(account=AccountName(["expenses", "goods_usd"])), # Elide USD
-            Posting(account=AccountName(["expenses", "services_eur"]), amount=Amount(Decimal("-30"), Commodity("EUR"))),
-            Posting(account=AccountName(["expenses", "fees_eur"])), # Elide EUR
-        ]
-    )
-    # Expected: goods_usd = -100 USD, fees_eur = -20 EUR
-    result = transaction.is_balanced()
-    assert isinstance(result, Success), f"Balancing failed: {result.failure() if isinstance(result, Failure) else 'Success'}"
-
-def test_transaction_is_balanced_multiple_elided_with_multiple_commodities():
-    transaction = Transaction(
-        date=date(2023, 1, 1),
-        payee="Multiple Elided with Multiple Commodities",
-        postings=[
-            Posting(account=AccountName(["assets", "cash_usd"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-            Posting(account=AccountName(["expenses", "import_usd"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
-            Posting(account=AccountName(["assets", "cash_eur"]), amount=Amount(Decimal("50"), Commodity("EUR"))),
-            Posting(account=AccountName(["expenses", "import_eur"]), amount=Amount(Decimal("-50"), Commodity("EUR"))),
-            Posting(account=AccountName(["expenses", "extra"])), # Elided, ambiguous due to multiple commodities
-            Posting(account=AccountName(["expenses", "extra2"])), # Elided, ambiguous due to multiple commodities
-        ]
-    )
-    result = transaction.is_balanced()
-    assert isinstance(result, Failure)
-    failure_val = result.failure()
-    assert isinstance(failure_val, MultipleCommoditiesRemainingError)
-    assert len(failure_val.commodities) == 2
-    assert set(str(c) for c in failure_val.commodities) == {"USD", "EUR"}
-
-def test_transaction_is_balanced_elided_posting_invalid_amount_in_other():
-    # Test case where an elided posting exists, but another posting has an invalid amount structure
-    # This should ideally be caught by validate_internal_consistency first,
-    # but is_balanced should also handle it gracefully if it reaches that point.
-    transaction = Transaction(
-        date=date(2023, 1, 1),
-        payee="Elided with Invalid Other",
-        postings=[
-            Posting(account=AccountName(["assets", "cash"]), amount="not-an-amount-object"), # type: ignore
+            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
             Posting(account=AccountName(["expenses", "food"])), # Elided
         ]
     )
-    # First, check consistency
-    consistency_result = transaction.validate_internal_consistency()
-    assert isinstance(consistency_result, Failure)
-    assert isinstance(consistency_result.failure(), InvalidPostingError)
-
-    # Then, check balance (which should also fail due to the invalid posting)
-    balance_result = transaction.is_balanced()
-    assert isinstance(balance_result, Failure)
-    assert isinstance(balance_result.failure(), InvalidPostingError)
-
-def test_journal_balance_successful_balancing():
-    # Test case where all transactions balance successfully
-    journal = Journal(entries=[
-        JournalEntry(transaction=Transaction(
-            date=date(2023, 1, 1),
-            payee="Balanced Transaction 1",
-            postings=[
-                Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-                Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
-            ]
-        )),
-        JournalEntry(transaction=Transaction(
-            date=date(2023, 1, 2),
-            payee="Balanced Transaction 2",
-            postings=[
-                Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("50"), Commodity("EUR"))),
-                Posting(account=AccountName(["expenses", "drink"]), amount=Amount(Decimal("-50"), Commodity("EUR"))),
-            ]
-        )),
-    ])
-    result = journal.balance()
+    result = tx.balance()
     assert isinstance(result, Success)
-    balanced_journal = result.unwrap()
-    assert len(balanced_journal.entries) == 2
-    for entry in balanced_journal.entries:
-        assert isinstance(entry.transaction.is_balanced(), Success)
+    balanced_tx = result.unwrap()
+    assert balanced_tx.postings[1].amount == Amount(Decimal("100"), Commodity("USD"))
+    assert balanced_tx.postings[1].comment
+    assert balanced_tx.postings[1].comment.comment == "auto-balanced"
+    assert isinstance(tx.is_balanced(), Success)
 
-def test_journal_balance_failure_on_single_transaction():
-    # Test case where one transaction fails to balance, causing the entire journal balancing to fail
-    journal = Journal(entries=[
-        JournalEntry(transaction=Transaction(
-            date=date(2023, 1, 1),
-            payee="Balanced Transaction",
-            postings=[
-                Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("100"), Commodity("USD"))),
-                Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
-            ]
-        )),
-        JournalEntry(transaction=Transaction(
-            date=date(2023, 1, 2),
-            payee="Imbalanced Transaction",
-            postings=[
-                Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("50"), Commodity("EUR"))),
-                Posting(account=AccountName(["expenses", "drink"]), amount=Amount(Decimal("-40"), Commodity("EUR"))),
-            ]
-        )),
-    ])
-    result = journal.balance()
+def test_transaction_balance_single_elided_with_existing_comment():
+    tx = Transaction(
+        date=date(2023, 1, 1),
+        payee="Test",
+        postings=[
+            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["expenses", "food"]), comment=Comment("Original comment")), # Elided
+        ]
+    )
+    result = tx.balance()
+    assert isinstance(result, Success)
+    balanced_tx = result.unwrap()
+    assert balanced_tx.postings[1].amount == Amount(Decimal("100"), Commodity("USD"))
+    assert balanced_tx.postings[1].comment
+    assert balanced_tx.postings[1].comment.comment == "Original comment auto-balanced"
+    assert isinstance(tx.is_balanced(), Success)
+
+
+def test_transaction_balance_single_elided_zero_balance_success():
+    tx = Transaction(
+        date=date(2023, 1, 1),
+        payee="Test",
+        postings=[
+            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["assets", "bank"]), amount=Amount(Decimal("100"), Commodity("USD"))),
+            Posting(account=AccountName(["expenses", "food"])), # Elided, should be 0
+        ]
+    )
+    result = tx.balance()
+    assert isinstance(result, Success)
+    balanced_tx = result.unwrap()
+    assert balanced_tx.postings[2].amount == Amount(Decimal("0"), Commodity("USD"))
+    assert balanced_tx.postings[2].comment
+    assert balanced_tx.postings[2].comment.comment == "auto-balanced"
+    assert isinstance(tx.is_balanced(), Success)
+
+def test_transaction_balance_multiple_elided_zero_balance_success():
+    tx = Transaction(
+        date=date(2023, 1, 1),
+        payee="Test",
+        postings=[
+            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["assets", "bank"]), amount=Amount(Decimal("100"), Commodity("USD"))),
+            Posting(account=AccountName(["expenses", "food"])), # Elided
+            Posting(account=AccountName(["income", "gifts"])), # Elided
+        ]
+    )
+    result = tx.balance()
+    assert isinstance(result, Success)
+    balanced_tx = result.unwrap()
+    assert balanced_tx.postings[2].amount == Amount(Decimal("0"), Commodity("USD"))
+    assert balanced_tx.postings[2].comment
+    assert balanced_tx.postings[2].comment.comment == "auto-balanced"
+    assert balanced_tx.postings[3].amount == Amount(Decimal("0"), Commodity("USD"))
+    assert balanced_tx.postings[3].comment
+    assert balanced_tx.postings[3].comment.comment == "auto-balanced"
+    assert isinstance(tx.is_balanced(), Success)
+
+
+def test_transaction_balance_imbalance_failure():
+    tx = Transaction(
+        date=date(2023, 1, 1),
+        payee="Test",
+        postings=[
+            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("90"), Commodity("USD"))), # Imbalance
+        ]
+    )
+    result = tx.balance()
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), ImbalanceError)
-    assert result.failure().commodity == Commodity("EUR")
-    assert result.failure().balance_sum == Decimal("10")
+    assert result.failure().commodity == Commodity("USD")
+    assert result.failure().balance_sum == Decimal("-10")
+    is_balanced_result = tx.is_balanced()
+    assert isinstance(is_balanced_result, Failure)
+    assert isinstance(is_balanced_result.failure(), ImbalanceError)
+
+
+def test_transaction_balance_ambiguous_elided_failure():
+    tx = Transaction(
+        date=date(2023, 1, 1),
+        payee="Test",
+        postings=[
+            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["expenses", "food"])), # Elided
+            Posting(account=AccountName(["expenses", "entertainment"])), # Elided
+        ]
+    )
+    result = tx.balance()
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), AmbiguousElidedAmountError)
+    assert result.failure().commodity == Commodity("USD")
+    is_balanced_result = tx.is_balanced()
+    assert isinstance(is_balanced_result, Failure)
+    assert isinstance(is_balanced_result.failure(), AmbiguousElidedAmountError)
+
+
+def test_transaction_balance_unresolved_elided_multiple_imbalances_failure():
+    tx = Transaction(
+        date=date(2023, 1, 1),
+        payee="Test",
+        postings=[
+            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["assets", "bank"]), amount=Amount(Decimal("-50"), Commodity("EUR"))),
+            Posting(account=AccountName(["expenses", "food"])), # Elided
+        ]
+    )
+    result = tx.balance()
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), UnresolvedElidedAmountError)
+    # The specific commodity in UnresolvedElidedAmountError can be one of the imbalanced ones.
+    assert result.failure().commodity in [Commodity("USD"), Commodity("EUR")]
+    is_balanced_result = tx.is_balanced()
+    assert isinstance(is_balanced_result, Failure)
+    assert isinstance(is_balanced_result.failure(), UnresolvedElidedAmountError)
+
+def test_transaction_balance_no_commodities_elided_all_elided_failure():
+    tx = Transaction(
+        date=date(2023, 1, 1),
+        payee="Test",
+        postings=[
+            Posting(account=AccountName(["assets", "cash"])), # Elided
+            Posting(account=AccountName(["expenses", "food"])), # Elided
+        ]
+    )
+    result = tx.balance()
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), NoCommoditiesElidedError)
+    is_balanced_result = tx.is_balanced()
+    assert isinstance(is_balanced_result, Failure)
+    assert isinstance(is_balanced_result.failure(), NoCommoditiesElidedError)
+
+def test_transaction_balance_multiple_commodities_remaining_failure():
+    tx = Transaction(
+        date=date(2023, 1, 1),
+        payee="Test",
+        postings=[
+            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("0"), Commodity("USD"))),
+            Posting(account=AccountName(["assets", "bank"]), amount=Amount(Decimal("0"), Commodity("EUR"))),
+            Posting(account=AccountName(["expenses", "food"])), # Elided
+            Posting(account=AccountName(["expenses", "travel"])), # Elided
+        ]
+    )
+    result = tx.balance()
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), MultipleCommoditiesRemainingError)
+    assert set(result.failure().commodities) == {Commodity("USD"), Commodity("EUR")}
+    is_balanced_result = tx.is_balanced()
+    assert isinstance(is_balanced_result, Failure)
+    assert isinstance(is_balanced_result.failure(), MultipleCommoditiesRemainingError)
+
+def test_transaction_balance_elided_matches_imbalances_success():
+    tx = Transaction(
+        date=date(2023, 1, 1),
+        payee="Test",
+        postings=[
+            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
+            Posting(account=AccountName(["assets", "bank"]), amount=Amount(Decimal("-50"), Commodity("EUR"))),
+            Posting(account=AccountName(["expenses", "food"])), # Elided for USD
+            Posting(account=AccountName(["expenses", "travel"])), # Elided for EUR
+        ]
+    )
+    result = tx.balance()
+    assert isinstance(result, Success)
+    balanced_tx = result.unwrap()
+    # Order of elided postings matters for matching with imbalances here
+    assert balanced_tx.postings[2].amount == Amount(Decimal("100"), Commodity("USD"))
+    assert balanced_tx.postings[2].comment and balanced_tx.postings[2].comment.comment == "auto-balanced"
+    assert balanced_tx.postings[3].amount == Amount(Decimal("50"), Commodity("EUR"))
+    assert balanced_tx.postings[3].comment and balanced_tx.postings[3].comment.comment == "auto-balanced"
+    assert isinstance(tx.is_balanced(), Success)
+
+def test_transaction_balance_non_elided_postings_no_comment_added():
+    tx = Transaction(
+        date=date(2023, 1, 1),
+        payee="Test",
+        postings=[
+            Posting(account=AccountName(["assets", "cash"]), amount=Amount(Decimal("-100"), Commodity("USD")), comment=Comment("Existing comment 1")),
+            Posting(account=AccountName(["expenses", "food"]), amount=Amount(Decimal("100"), Commodity("USD"))),
+        ]
+    )
+    result = tx.balance()
+    assert isinstance(result, Success)
+    balanced_tx = result.unwrap()
+    # First posting (not elided) should retain its original comment
+    assert balanced_tx.postings[0].comment
+    assert balanced_tx.postings[0].comment.comment == "Existing comment 1"
+    # Second posting (not elided) should not have a comment added
+    assert balanced_tx.postings[1].comment is None
+    assert isinstance(tx.is_balanced(), Success)

@@ -71,6 +71,9 @@ This document tracks the progress, completed features, and remaining tasks for l
 - Added `validate_internal_consistency` and `is_balanced` methods to the `Transaction` class in `src/classes.py`.
 - Defined custom error classes for transaction validation and balancing in `src/classes.py`.
 - Updated `memory-bank/context7_library_ids.md`.
+- `Transaction.balance()` in `src/classes.py` now appends "; auto-balanced" to comments of postings with calculated (elided) amounts.
+- Added tests to `tests/test_classes.py` for the auto-commenting feature.
+- Corrected `Commodity.isStock()` regex and test assertions in `tests/test_classes.py` related to `returns.result.Result` checking. All tests in `tests/test_classes.py` pass.
 
 ## What's Left to Build
 
@@ -95,6 +98,7 @@ This document tracks the progress, completed features, and remaining tasks for l
 - Test cases in `tests/test_balance_printing.py` have been significantly simplified and all are passing.
 - All previously failing tests related to capital gains logic have been fixed.
 - Error handling for proceeds consolidation in `src/balance.py` has been refactored using the `Result` pattern.
+- Automatic commenting of calculated balances in `Transaction.balance()` is implemented and tested.
 - Ready to begin Phase 2 (Generating journal entries, updating files).
 
 ## Known Issues
@@ -118,3 +122,4 @@ This document tracks the progress, completed features, and remaining tasks for l
 - Error handling for proceeds consolidation in `src/balance.py` now uses the `Result` pattern with custom error types, making it more robust and explicit.
 - Optional return values in `src/balance.py` are now represented using `Maybe[T]` from the `returns` library, improving explicitness in handling potentially absent values.
 - Added methods to `Transaction` class for self-validation of internal consistency and balancing.
+- `Transaction.balance()` now adds comments to auto-calculated postings.

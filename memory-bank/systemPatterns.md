@@ -52,7 +52,9 @@ This document describes the system architecture and key design patterns used in 
 - Caching Pattern: Utilized (`src/classes.py:SourceCacheManager`) for optimizing source position lookups during parsing.
 - Result Pattern: Used with `returns.result.Result` (`Success`, `Failure`) for functions that can fail in predictable ways, such as `BalanceSheet._get_consolidated_proceeds`. This enhances error handling by making failure cases explicit and type-safe.
 - Maybe Pattern: Used with `returns.maybe.Maybe` (`Some`, `Nothing`) for functions that can return an optional value (e.g., `Lot.try_create_from_posting`, `Account.get_account`, `BalanceSheet.get_account`). This makes handling of potentially absent values more explicit.
-- Transaction Validation Pattern: The `Transaction` class in `src/classes.py` now includes methods (`validate_internal_consistency`, `is_balanced`) for checking its own integrity and balance based on its postings. This uses the `Result` pattern and custom error types (`TransactionIntegrityError`, `TransactionBalanceError` and their subtypes) for clear error reporting.
+- Transaction Validation Pattern: The `Transaction` class in `src/classes.py` now includes methods (`validate_internal_consistency`, `is_balanced`, `balance`) for checking its own integrity and balance based on its postings.
+    - The `balance` method, if successful in resolving elided amounts, now adds a comment "; auto-balanced" to the postings whose amounts were calculated. This comment is appended to any existing comment on the posting.
+    - This uses the `Result` pattern and custom error types (`TransactionIntegrityError`, `TransactionBalanceError` and their subtypes) for clear error reporting.
 
 ## Component Relationships
 

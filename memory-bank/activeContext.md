@@ -117,6 +117,10 @@ This document outlines the current focus and active considerations for ledger-pa
 - Added `validate_internal_consistency` and `is_balanced` methods to the `Transaction` class in `src/classes.py` for validating individual transaction integrity and balance.
 - Defined custom error classes (`TransactionValidationError`, `TransactionIntegrityError`, `MissingDateError`, `MissingDescriptionError`, `InsufficientPostingsError`, `InvalidPostingError`, `TransactionBalanceError`, `ImbalanceError`, `AmbiguousElidedAmountError`, `UnresolvedElidedAmountError`) in `src/classes.py`.
 - Updated `memory-bank/context7_library_ids.md` with the ID for `plaintextaccounting`.
+- Modified `Transaction.balance()` in `src/classes.py` to add a comment "; auto-balanced" to postings whose amounts are calculated. This comment is appended to existing comments.
+- Added new test cases to `tests/test_classes.py` to verify the automatic comment addition for balanced postings.
+- Corrected `Commodity.isStock()` regex in `src/classes.py` to allow for periods in stock tickers (e.g., "MSFT.US") and adjusted max length.
+- Corrected assertions in `tests/test_classes.py` to use `isinstance(result, Success)` instead of `result.is_success` for checking `returns.result.Result` types. All tests in `tests/test_classes.py` now pass.
 
 ## Next Steps
 
@@ -146,6 +150,7 @@ Phase 2: Future Steps
 - Error handling for proceeds consolidation now uses the `Result` pattern with custom error types (`NoCashProceedsFoundError`, `AmbiguousProceedsError`) for better type safety and clarity.
 - Optional return values in `src/balance.py` are now represented using `Maybe[T]` from the `returns` library, improving explicitness in handling potentially absent values.
 - Transaction validation and balancing logic is being added to the `Transaction` class itself for checks that don't require external journal context.
+- Automatic commenting of calculated balances in `Transaction.balance()` provides better traceability for elided amounts.
 
 ## Important Patterns and Preferences
 

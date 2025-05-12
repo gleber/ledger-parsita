@@ -288,8 +288,8 @@ class Commodity(PositionAware["Commodity"]):
 
     def isStock(self) -> bool:
         """Checks if the commodity is likely a stock (simple ticker check)."""
-        # Check for 1-5 uppercase letters and ensure it's not a known cryptocurrency or cash
-        return bool(re.fullmatch(r"[A-Z\.]{1,5}", self.name)) and not self.isCash() and not self.isCrypto() # Corrected check to avoid recursion
+        # Check for 1-5 uppercase letters, allowing periods, and ensure it's not a known cryptocurrency or cash
+        return bool(re.fullmatch(r"[A-Z\.]{1,7}", self.name)) and not self.isCash() and not self.isCrypto() # Adjusted length for tickers like MSFT.US
 
     def isOption(self) -> bool:
         """Checks if the commodity is likely an option contract (basic pattern check)."""
@@ -732,16 +732,42 @@ class Transaction(PositionAware["Transaction"]):
             imbalances = [(comm, net) for comm, net in commodity_sums.items() if net != Decimal(0)]
             if len(imbalances) == 1:
                 comm, net = imbalances[0]
-                elided_idx = new_tx.postings.index(elided_postings[0])
-                new_tx.postings[elided_idx] = replace(elided_postings[0], amount=Amount(quantity=-net, commodity=comm))
+                elided_posting_original = elided_postings[0]
+                elided_idx = new_tx.postings.index(elided_posting_original)
+                
+                new_comment_text = "auto-balanced"
+                if elided_posting_original.comment:
+                    final_comment_text = f"{elided_posting_original.comment.comment} {new_comment_text}"
+                else:
+                    final_comment_text = new_comment_text
+                updated_comment = Comment(comment=final_comment_text)
+                
+                new_tx.postings[elided_idx] = replace(
+                    elided_posting_original,
+                    amount=Amount(quantity=-net, commodity=comm),
+                    comment=updated_comment
+                )
                 return Success(new_tx)
             if len(imbalances) > 1:
                 return Failure(UnresolvedElidedAmountError(list(commodity_sums.keys())[0] if commodity_sums else Commodity("USD")))
             # No imbalance, elided should be 0, need a commodity
             if commodity_sums:
                 comm = list(commodity_sums.keys())[0]
-                elided_idx = new_tx.postings.index(elided_postings[0])
-                new_tx.postings[elided_idx] = replace(elided_postings[0], amount=Amount(quantity=Decimal(0), commodity=comm))
+                elided_posting_original = elided_postings[0]
+                elided_idx = new_tx.postings.index(elided_posting_original)
+
+                new_comment_text = "auto-balanced"
+                if elided_posting_original.comment:
+                    final_comment_text = f"{elided_posting_original.comment.comment} {new_comment_text}"
+                else:
+                    final_comment_text = new_comment_text
+                updated_comment = Comment(comment=final_comment_text)
+
+                new_tx.postings[elided_idx] = replace(
+                    elided_posting_original,
+                    amount=Amount(quantity=Decimal(0), commodity=comm),
+                    comment=updated_comment
+                )
                 return Success(new_tx)
             return Failure(NoCommoditiesElidedError())
 
@@ -752,22 +778,61 @@ class Transaction(PositionAware["Transaction"]):
                 return Failure(MultipleCommoditiesRemainingError(list(commodity_sums.keys())))
             if commodity_sums:
                 comm = list(commodity_sums.keys())[0]
-                for elided in elided_postings:
-                    elided_idx = new_tx.postings.index(elided)
-                    new_tx.postings[elided_idx] = replace(elided, amount=Amount(quantity=Decimal(0), commodity=comm))
+                for elided_posting_original in elided_postings:
+                    elided_idx = new_tx.postings.index(elided_posting_original)
+
+                    new_comment_text = "auto-balanced"
+                    if elided_posting_original.comment:
+                        final_comment_text = f"{elided_posting_original.comment.comment} {new_comment_text}"
+                    else:
+                        final_comment_text = new_comment_text
+                    updated_comment = Comment(comment=final_comment_text)
+
+                    new_tx.postings[elided_idx] = replace(
+                        elided_posting_original,
+                        amount=Amount(quantity=Decimal(0), commodity=comm),
+                        comment=updated_comment
+                    )
                 return Success(new_tx)
             return Failure(NoCommoditiesElidedError())
 
-        if len(imbalances) == 1 and len(elided_postings) == 1:
+        if len(imbalances) == 1 and len(elided_postings) == 1: # This case is already handled by the first "Handle single elided posting" block
+            # This specific block might be redundant if the first single elided posting logic covers it.
+            # However, to be safe and explicit, applying the comment logic here too.
             comm, net = imbalances[0]
-            elided_idx = new_tx.postings.index(elided_postings[0])
-            new_tx.postings[elided_idx] = replace(elided_postings[0], amount=Amount(quantity=-net, commodity=comm))
+            elided_posting_original = elided_postings[0]
+            elided_idx = new_tx.postings.index(elided_posting_original)
+
+            new_comment_text = "auto-balanced"
+            if elided_posting_original.comment:
+                final_comment_text = f"{elided_posting_original.comment.comment} {new_comment_text}"
+            else:
+                final_comment_text = new_comment_text
+            updated_comment = Comment(comment=final_comment_text)
+            
+            new_tx.postings[elided_idx] = replace(
+                elided_posting_original,
+                amount=Amount(quantity=-net, commodity=comm),
+                comment=updated_comment
+            )
             return Success(new_tx)
 
         if len(imbalances) == len(elided_postings):
-            for (comm, net), elided in zip(imbalances, elided_postings):
-                elided_idx = new_tx.postings.index(elided)
-                new_tx.postings[elided_idx] = replace(elided, amount=Amount(quantity=-net, commodity=comm))
+            for (comm, net), elided_posting_original in zip(imbalances, elided_postings):
+                elided_idx = new_tx.postings.index(elided_posting_original)
+
+                new_comment_text = "auto-balanced"
+                if elided_posting_original.comment:
+                    final_comment_text = f"{elided_posting_original.comment.comment} {new_comment_text}"
+                else:
+                    final_comment_text = new_comment_text
+                updated_comment = Comment(comment=final_comment_text)
+
+                new_tx.postings[elided_idx] = replace(
+                    elided_posting_original,
+                    amount=Amount(quantity=-net, commodity=comm),
+                    comment=updated_comment
+                )
             return Success(new_tx)
 
         # Handle ambiguity in multiple elided postings
