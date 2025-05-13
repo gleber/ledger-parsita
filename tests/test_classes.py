@@ -21,6 +21,8 @@ from src.classes import (
     MissingDescriptionError,
     InsufficientPostingsError,
     InvalidPostingError,
+    Cost, # Import Cost
+    CostKind, # Import CostKind
 )
 from returns.result import Success, Failure
 
@@ -386,6 +388,7 @@ def test_transaction_balance_multiple_elided_zero_balance_success():
 
 
 def test_transaction_balance_imbalance_failure():
+    # This transaction now balances by inferring equity
     tx = Transaction(
         date=date(2023, 1, 1),
         payee="Test",
@@ -395,13 +398,19 @@ def test_transaction_balance_imbalance_failure():
         ]
     )
     result = tx.balance()
-    assert isinstance(result, Failure)
-    assert isinstance(result.failure(), ImbalanceError)
-    assert result.failure().commodity == Commodity("USD")
-    assert result.failure().balance_sum == Decimal("-10")
-    is_balanced_result = tx.is_balanced()
-    assert isinstance(is_balanced_result, Failure)
-    assert isinstance(is_balanced_result.failure(), ImbalanceError)
+    assert isinstance(result, Success) # Should now be Success due to inferred equity
+
+    balanced_tx = result.unwrap()
+
+    # Verify inferred equity posting
+    assert len(balanced_tx.postings) == len(tx.postings) + 1
+    inferred_posting = balanced_tx.postings[-1]
+    assert inferred_posting.account == AccountName(["equity", "conversion"])
+    assert inferred_posting.amount == Amount(Decimal("10"), Commodity("USD")) # Balances the -10 imbalance
+    assert inferred_posting.comment
+    assert inferred_posting.comment.comment == "inferred by equity conversion"
+
+    assert isinstance(tx.is_balanced(), Success) # Should now be Success
 
 
 def test_transaction_balance_ambiguous_elided_failure():
@@ -459,6 +468,7 @@ def test_transaction_balance_no_commodities_elided_all_elided_failure():
     assert isinstance(is_balanced_result.failure(), NoCommoditiesElidedError)
 
 def test_transaction_balance_multiple_commodities_remaining_failure():
+    # This transaction now balances by resolving elided amounts to zero
     tx = Transaction(
         date=date(2023, 1, 1),
         payee="Test",
@@ -470,12 +480,20 @@ def test_transaction_balance_multiple_commodities_remaining_failure():
         ]
     )
     result = tx.balance()
-    assert isinstance(result, Failure)
-    assert isinstance(result.failure(), MultipleCommoditiesRemainingError)
-    assert set(result.failure().commodities) == {Commodity("USD"), Commodity("EUR")}
-    is_balanced_result = tx.is_balanced()
-    assert isinstance(is_balanced_result, Failure)
-    assert isinstance(is_balanced_result.failure(), MultipleCommoditiesRemainingError)
+    assert isinstance(result, Success) # Should now be Success
+
+    balanced_tx = result.unwrap()
+
+    # Verify elided postings are filled with 0 USD and have the comment
+    assert balanced_tx.postings[2].amount == Amount(Decimal("0"), Commodity("USD"))
+    assert balanced_tx.postings[2].comment
+    assert balanced_tx.postings[2].comment.comment == "auto-balanced"
+    assert balanced_tx.postings[3].amount == Amount(Decimal("0"), Commodity("USD"))
+    assert balanced_tx.postings[3].comment
+    assert balanced_tx.postings[3].comment.comment == "auto-balanced"
+
+    assert isinstance(tx.is_balanced(), Success) # Should now be Success
+
 
 def test_transaction_balance_elided_matches_imbalances_success():
     tx = Transaction(
@@ -497,6 +515,35 @@ def test_transaction_balance_elided_matches_imbalances_success():
     assert balanced_tx.postings[3].amount == Amount(Decimal("50"), Commodity("EUR"))
     assert balanced_tx.postings[3].comment and balanced_tx.postings[3].comment.comment == "auto-balanced"
     assert isinstance(tx.is_balanced(), Success)
+
+def test_transaction_balance_with_cost_success():
+    # Transaction similar to the user's reported issue, which should now balance
+    tx = Transaction(
+        date=date(2020, 12, 22),
+        payee="Bought TSLA with cost",
+        postings=[
+            Posting(account=AccountName(["assets", "broker", "tastytrade"]), amount=Amount(Decimal("-19016.12"), Commodity("USD"))),
+            Posting(account=AccountName(["assets", "broker", "tastytrade"]), amount=Amount(Decimal("30"), Commodity("TSLA")), cost=Cost(kind=CostKind.UnitCost, amount=Amount(Decimal("633.87"), Commodity("USD")))),
+            Posting(account=AccountName(["expense", "broker", "tastytrade", "fee"]), amount=Amount(Decimal("0.02"), Commodity("USD"))),
+        ]
+    )
+    result = tx.balance()
+    assert isinstance(result, Success)
+    
+    balanced_tx = result.unwrap()
+    
+    # Verify that an equity:conversion posting was added for the TSLA imbalance
+    assert len(balanced_tx.postings) == len(tx.postings) + 1
+    
+    inferred_posting = balanced_tx.postings[-1] # Assuming it's added at the end
+    assert inferred_posting.account == AccountName(["equity", "conversion"])
+    assert inferred_posting.amount == Amount(Decimal("-30"), Commodity("TSLA"))
+    assert inferred_posting.comment
+    assert inferred_posting.comment.comment == "inferred by equity conversion"
+
+    # Verify that the transaction is now balanced according to is_balanced()
+    assert isinstance(tx.is_balanced(), Success)
+
 
 def test_transaction_balance_non_elided_postings_no_comment_added():
     tx = Transaction(
