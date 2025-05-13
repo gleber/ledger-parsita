@@ -3,7 +3,7 @@ from pathlib import Path # Import Path
 from src.balance import BalanceSheet, Account, CashBalance # Import BalanceSheet, Account, and CashBalance
 from src.classes import Amount, Commodity, AccountName, Journal # Import Journal
 from decimal import Decimal # Import Decimal
-from returns.result import Success # Import Success
+from returns.result import Success, Failure # Import Success and Failure
 
 # Simplified mock data
 mock_balance_sheet = BalanceSheet(
@@ -215,7 +215,9 @@ def test_balance_printing_with_journal_file():
 
     journal = parse_result.unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = BalanceSheet.from_transactions(transactions_only)
+    result_balance_sheet = BalanceSheet.from_transactions(transactions_only)
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # Test hierarchical total
     # The assertions against specific original_expected_* lists have been removed

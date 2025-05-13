@@ -13,6 +13,7 @@ import bisect
 from returns.result import Result, Success, Failure, safe # Import Result, Success, Failure, safe
 from returns.pipeline import flow
 from returns.pointfree import bind
+from returns.maybe import Maybe, Some, Nothing # Import Maybe types
 from parsita import ParseError, ParserContext, Parser, Reader, lit, reg, rep, rep1, repsep, opt # Import necessary parsita components
 from parsita.state import Continue, Input, Output, State # Import from parsita.state
 from parsita.util import splat # Import splat
@@ -50,12 +51,12 @@ class ImbalanceError(TransactionBalanceError):
     def __init__(self, commodity: "Commodity", balance_sum: Decimal):
         self.commodity = commodity
         self.balance_sum = balance_sum
-        super().__init__(f"Transaction does not balance for commodity {commodity}. Sum is {balance_sum}.")
+        super().__init__(f"Transaction does not balance for commodity {commodity}. Sum is {balance_sum}")
 
 class AmbiguousElidedAmountError(TransactionBalanceError):
     def __init__(self, commodity: "Commodity"):
         self.commodity = commodity
-        super().__init__(f"More than one elided amount for commodity {commodity}, cannot infer balance.")
+        super().__init__(f"More than one elided amount for commodity {commodity}, cannot infer balance")
 
 class UnresolvedElidedAmountError(TransactionBalanceError):
     def __init__(self, commodity: "Commodity"):
@@ -63,7 +64,7 @@ class UnresolvedElidedAmountError(TransactionBalanceError):
         super().__init__(f"Cannot resolve elided amount for commodity {commodity}.")
 
 class NoCommoditiesElidedError(TransactionBalanceError):
-    def __init__(self, message: str = "Cannot resolve elided amount as no commodities are present in the transaction."):
+    def __init__(self, message: str = "Cannot resolve elided amount as no commodities are present in the transaction"):
         super().__init__(message)
 
 class MultipleCommoditiesRemainingError(TransactionBalanceError):
@@ -76,6 +77,34 @@ class MultipleCommoditiesRemainingError(TransactionBalanceError):
             else:
                 message = "Cannot resolve remaining elided amounts due to multiple commodities present in the transaction."
         super().__init__(message)
+
+# Verification Error Types
+class VerificationError(Exception):
+    """Base class for journal-level verification errors."""
+    def __init__(self, message: str, source_location: Optional["SourceLocation"] = None):
+        self.source_location = source_location
+        super().__init__(message)
+
+    def __str__(self):
+        loc_str = f" at {self.source_location.filename}:{self.source_location.line}:{self.source_location.column}" if self.source_location and self.source_location.line is not None else ""
+        # Ensure message is stringified properly before concatenation
+        base_message = super().__str__()
+        return f"{base_message}{loc_str}"
+
+
+class AcquisitionMissingDatedSubaccountError(VerificationError):
+    """Error for stock/option acquisition posting not using a dated subaccount."""
+    def __init__(self, posting: "Posting"):
+        message = f"Stock/option acquisition posting for '{posting.amount.commodity}' to account '{posting.account}' does not use a dated subaccount (YYYYMMDD)"
+        super().__init__(message, posting.source_location)
+
+class BalanceSheetCalculationError(VerificationError):
+    """Error during balance sheet calculation."""
+    # This will likely wrap other errors like ValueError or Failure contents
+    def __init__(self, original_error: Exception, source_location: Optional["SourceLocation"] = None):
+        self.original_error = original_error
+        message = f"Balance sheet calculation failed: {original_error}"
+        super().__init__(message, source_location)
 
 
 CASH_TICKERS = ["USD", "PLN", "EUR"]
@@ -607,12 +636,16 @@ class Transaction(PositionAware["Transaction"]):
 
         return None # No explicit cost and inference not possible
 
-    def get_asset_acquisition_posting(self) -> Optional[Posting]:
-        """Finds the asset acquisition posting in the transaction, if any."""
+    def get_asset_acquisition_posting(self) -> Maybe[Posting]:
+        """Finds the asset acquisition posting in the transaction, if any. Returns Maybe."""
         for posting in self.postings:
-            if posting.account.isAsset() and posting.account.isDatedSubaccount() and posting.amount is not None and posting.amount.quantity > 0:
-                return posting
-        return None
+            # Check if it's an asset, has an amount, and quantity is positive (acquisition)
+            # No longer checking isDatedSubaccount here, as that's part of the verification step.
+            if posting.account.isAsset() and posting.amount is not None and posting.amount.quantity > 0:
+                 # Check if it's stock or option
+                if posting.amount.commodity.isStock() or posting.amount.commodity.isOption():
+                    return Some(posting)
+        return Nothing
 
     def get_cost_basis_posting(self, acquisition_posting: Posting) -> Optional[Posting]:
         """Finds the cost basis posting for a given asset acquisition posting."""
@@ -639,7 +672,7 @@ class Transaction(PositionAware["Transaction"]):
         else:
             return None # Handle zero quantity acquisition
 
-    def validate_internal_consistency(self) -> Result[None, TransactionIntegrityError]:
+    def verify_integrity(self) -> Result[None, TransactionIntegrityError]:
         """
         Checks if the Transaction object has all its essential components present and in a basic valid state.
         Assumes the transaction is already parsed.
@@ -672,6 +705,19 @@ class Transaction(PositionAware["Transaction"]):
             # For now, focusing on account and amount (if present) as per the plan.
         return Success(None)
 
+    def verify(self) -> Result[None, TransactionValidationError]:
+        """
+        Performs a full verification of the transaction, checking for integrity and balance.
+        """
+        integrity_check = self.verify_integrity()
+        if isinstance(integrity_check, Failure):
+            return integrity_check
+
+        balance_check = self.is_balanced()
+        # is_balanced already returns Result[None, TransactionBalanceError]
+        # TransactionBalanceError is a subclass of TransactionValidationError
+        return balance_check
+
     def has_elided_values(self) -> bool:
         """
         Checks if the transaction has any postings with elided (missing) amounts.
@@ -685,9 +731,9 @@ class Transaction(PositionAware["Transaction"]):
         Returns Success(None) if balanced or can be balanced, or Failure with an appropriate error if not.
         """
         # First check for internal consistency
-        consistency_result = self.validate_internal_consistency()
-        if isinstance(consistency_result, Failure):
-            return Failure(consistency_result.failure())
+        integrity_result = self.verify_integrity() # Changed from validate_internal_consistency
+        if isinstance(integrity_result, Failure):
+            return Failure(integrity_result.failure())
 
         # Use balance() to check if the transaction can be balanced
         balance_result = self.balance()
@@ -703,9 +749,9 @@ class Transaction(PositionAware["Transaction"]):
         elided_commodities = set()
 
         # Check for internal consistency first to catch invalid postings
-        consistency_result = self.validate_internal_consistency()
-        if isinstance(consistency_result, Failure):
-            return Failure(consistency_result.failure())
+        integrity_result = self.verify_integrity() # Changed from validate_internal_consistency
+        if isinstance(integrity_result, Failure):
+            return Failure(integrity_result.failure())
 
         # First pass: calculate sums for non-elided amounts and track elided postings
         for posting in new_tx.postings:
@@ -1134,3 +1180,59 @@ class Journal(PositionAware["Journal"]):
 
         entries = [include_one(i) for i in self.entries] # Use self.entries
         return Success(replace(self, entries=entries)) # Use self
+
+    def verify(self) -> Result[None, List[VerificationError]]:
+        """
+        Performs comprehensive verification of the journal.
+
+        Checks include:
+        1. Stock/option acquisitions use dated subaccounts.
+        2. Individual transaction integrity and balance.
+        3. Successful balance sheet calculation.
+
+        Returns Success(None) if all checks pass, otherwise Failure containing a list of VerificationError objects.
+        """
+        from src.balance import BalanceSheet # Import locally to avoid circular dependency
+
+        verification_errors: List[VerificationError] = []
+
+        # Check 1: Stock/option acquisitions use dated subaccounts
+        for entry in self.entries:
+            if entry.transaction:
+                tx = entry.transaction
+                maybe_acq_posting = tx.get_asset_acquisition_posting()
+                if isinstance(maybe_acq_posting, Some):
+                    acq_posting = maybe_acq_posting.unwrap()
+                    # Check commodity type again just to be sure (though get_asset_acquisition_posting should handle this)
+                    if acq_posting.amount and (acq_posting.amount.commodity.isStock() or acq_posting.amount.commodity.isOption()):
+                        if not acq_posting.account.isDatedSubaccount():
+                            verification_errors.append(AcquisitionMissingDatedSubaccountError(acq_posting))
+
+        # Check 2: Individual transaction verification
+        for entry in self.entries:
+            if entry.transaction:
+                tx = entry.transaction
+                tx_verify_result = tx.verify() # This now checks integrity and balance
+                if isinstance(tx_verify_result, Failure):
+                    # Wrap the TransactionValidationError in a VerificationError
+                    # Need to handle potential list of errors if verify changes later
+                    err = tx_verify_result.failure()
+                    # Attempt to get source location from the transaction itself
+                    loc = tx.source_location
+                    # If the error itself has a location (less likely for tx errors), prefer that? No, stick to tx location.
+                    verification_errors.append(VerificationError(str(err), loc))
+
+
+        # Check 3: Balance Sheet Calculation Errors
+        balance_sheet_build_result = BalanceSheet.from_journal(self)
+        if isinstance(balance_sheet_build_result, Failure):
+            # from_journal now returns Failure(List[BalanceSheetCalculationError])
+            # These errors already have source locations if available from the transaction
+            # that caused the error during its apply_transaction call.
+            bs_errors = balance_sheet_build_result.failure()
+            verification_errors.extend(bs_errors) # bs_errors is already List[BalanceSheetCalculationError]
+
+        if verification_errors:
+            return Failure(verification_errors)
+        else:
+            return Success(None)

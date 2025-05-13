@@ -5,7 +5,7 @@ from typing import Optional, Union, List
 import click
 import pprint
 from pathlib import Path
-from src.classes import Journal, JournalEntry # Updated import
+from src.classes import Journal, JournalEntry, VerificationError # Updated import
 import re
 from parsita import ParseError
 from src.classes import Posting, Transaction, sl, AccountName # Import AccountName
@@ -209,11 +209,16 @@ def balance_cmd(filename: Path, query: Optional[Filters], flat: bool, display: s
         exit(1)
 
     journal: Journal = result.unwrap()
-    try:
-        balance_sheet = BalanceSheet.from_journal(journal) # Use new method
-    except ValueError as e:
-        click.echo(f"Error calculating balance sheet: {e}", err=True)
+    
+    balance_sheet_result = BalanceSheet.from_journal(journal) # Use new method
+    if not is_successful(balance_sheet_result):
+        errors = balance_sheet_result.failure()
+        click.echo("Error calculating balance sheet:", err=True)
+        for error in errors: # errors is List[BalanceSheetCalculationError]
+            click.echo(f"  - {error}", err=True) # BalanceSheetCalculationError has __str__
         exit(1)
+    
+    balance_sheet: BalanceSheet = balance_sheet_result.unwrap()
 
     click.echo("Current Balances:")
     if flat:
@@ -246,15 +251,20 @@ def gains_cmd(filename: Path, query: Optional[Filters]):
         exit(1)
 
     journal: Journal = result.unwrap()
-    try:
-        balance_sheet = BalanceSheet.from_journal(journal) # Use new method
-    except ValueError as e:
-        click.echo(f"Error calculating capital gains: {e}", err=True)
+    
+    balance_sheet_result = BalanceSheet.from_journal(journal) # Use new method
+    if not is_successful(balance_sheet_result):
+        errors = balance_sheet_result.failure()
+        click.echo("Error calculating capital gains:", err=True)
+        for error in errors: # errors is List[BalanceSheetCalculationError]
+            click.echo(f"  - {error}", err=True)
         exit(1)
+        
+    balance_sheet: BalanceSheet = balance_sheet_result.unwrap()
 
     click.echo("Capital Gains Results:")
-    if balance_sheet.capital_gains_realized:
-        for gain_result in balance_sheet.capital_gains_realized:
+    if balance_sheet.capital_gains_realized: # Accessing attribute on unwrapped BalanceSheet
+        for gain_result in balance_sheet.capital_gains_realized: # Accessing attribute on unwrapped BalanceSheet
             closing_date_str = gain_result.closing_date.strftime('%Y-%m-%d') if gain_result.closing_date else 'N/A'
             acquisition_date_str = gain_result.acquisition_date.strftime('%Y-%m-%d') if gain_result.acquisition_date else 'N/A'
 
@@ -273,6 +283,37 @@ def gains_cmd(filename: Path, query: Optional[Filters]):
 
     exit(0)
 
+
+# Define the verify command
+@cli.command("verify")
+@click.argument(
+    "filename", type=click.Path(exists=True, dir_okay=False, path_type=Path)
+)
+def verify_cmd(filename: Path):
+    """Verifies the integrity and consistency of the journal file."""
+    parse_result: Result[Journal, Union[ParseError, str, ValueError]] = Journal.parse_from_file(
+        str(filename.absolute()), flat=True, strip=False, query=None # flat=True to resolve includes for full verification
+    )
+
+    if not is_successful(parse_result):
+        error_content = parse_result.failure()
+        click.echo(f"Error parsing journal file: {error_content}", err=True)
+        exit(1)
+
+    journal: Journal = parse_result.unwrap()
+    
+    verification_result = journal.verify() # This returns Result[None, List[VerificationError]]
+
+    if is_successful(verification_result):
+        click.echo(f"Journal '{filename}' verified successfully.")
+        exit(0)
+    else:
+        errors: List[VerificationError] = verification_result.failure()
+        click.echo(f"Journal verification failed with {len(errors)} error(s):", err=True)
+        for i, error in enumerate(errors):
+            # VerificationError has a custom __str__ that includes source location
+            click.echo(f"  {i+1}. {error}", err=True) 
+        exit(1)
 
 if __name__ == "__main__":
     cli()

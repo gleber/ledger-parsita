@@ -8,7 +8,12 @@ from returns.maybe import Maybe, Some, Nothing
 from datetime import date
 from collections import defaultdict # Import defaultdict
 
-from src.classes import AccountName, Amount, Commodity, Posting, Transaction, Cost, CostKind, CommodityKind, CapitalGainResult, Comment, Journal # Import Journal
+from src.classes import (
+    AccountName, Amount, Commodity, Posting, Transaction, Cost, CostKind, 
+    CommodityKind, CapitalGainResult, Comment, Journal, SourceLocation, # Added SourceLocation
+    VerificationError, BalanceSheetCalculationError # Import new error types
+)
+
 
 @dataclass
 class Lot:
@@ -577,50 +582,51 @@ class BalanceSheet:
         Applies a single transaction to the balance sheet, updating balances, lots, and calculating capital gains.
         This method modifies the BalanceSheet instance it's called on and returns it.
         """
-        if "SOL" in transaction.to_journal_string():
-            print(f"DEBUG: {transaction.to_journal_string()}")
+        try:
+            for posting in transaction.postings:
+                self._apply_direct_posting_effects(posting, transaction)
+                if posting.amount is not None:
+                    account_node = self.get_or_create_account(posting.account)
+                    if posting.amount.commodity not in account_node.own_balances:
+                        pass
+                    balance_obj = account_node.get_own_balance(posting.amount.commodity)
+                    if posting.isClosing() and isinstance(balance_obj, AssetBalance):
+                        self._process_asset_sale_capital_gains(posting, transaction)
+            return Success(self)
+        except ValueError as e:
+            # Try to get source location from the transaction
+            loc: Optional[SourceLocation] = transaction.source_location
+            return Failure(BalanceSheetCalculationError(e, loc))
+        except Exception as e: # Catch any other unexpected error during processing
+            loc: Optional[SourceLocation] = transaction.source_location
+            return Failure(BalanceSheetCalculationError(e, loc))
 
-        for posting in transaction.postings:
-            # _apply_direct_posting_effects will handle all relevant posting types,
-            # including those with only balance/cost (like balance assertions for lots)
-            # or only amounts (like cash movements or sales).
-            self._apply_direct_posting_effects(posting, transaction)
-
-            # Check if this posting is an asset sale to trigger capital gains processing.
-            # This should only happen for postings that represent an actual change in asset quantity (have an amount).
-            if posting.amount is not None: # Ensure posting.amount exists before using it
-                account_node = self.get_or_create_account(posting.account)
-                # Get balance_obj based on posting.amount.commodity for AssetBalance check
-                # Need to ensure that own_balances has this commodity, could be a new commodity for the account
-                if posting.amount.commodity not in account_node.own_balances:
-                    # If the commodity isn't in own_balances yet, get_own_balance will create it.
-                    # This is safe, but the balance_obj might be a new, empty AssetBalance if it's an asset type.
-                    # For isClosing() check, we need an existing AssetBalance with lots.
-                    # However, isClosing() itself doesn't rely on existing lots, just the nature of the posting.
-                     pass # Allow get_own_balance to create if needed, or rely on it being there from _apply_direct_posting_effects
-
-                balance_obj = account_node.get_own_balance(posting.amount.commodity)
-
-                if posting.isClosing() and isinstance(balance_obj, AssetBalance):
-                    self._process_asset_sale_capital_gains(posting, transaction)
-        return self
 
     @staticmethod
-    def from_transactions(transactions: List[Transaction]) -> 'BalanceSheet':
+    def from_transactions(transactions: List[Transaction]) -> Result['BalanceSheet', List[BalanceSheetCalculationError]]:
         """
-        Builds a BalanceSheet with a hierarchical account structure by applying transactions.
+        Builds a BalanceSheet by applying transactions.
+        Returns Result[BalanceSheet, List[BalanceSheetCalculationError]].
         """
         sorted_transactions = sorted(transactions, key=lambda t: t.date)
         balance_sheet = BalanceSheet()
+        errors: List[BalanceSheetCalculationError] = []
+
         for transaction in sorted_transactions:
-            balance_sheet.apply_transaction(transaction)
-        return balance_sheet
+            apply_result = balance_sheet.apply_transaction(transaction)
+            if isinstance(apply_result, Failure):
+                # apply_transaction now returns Failure(BalanceSheetCalculationError)
+                errors.append(apply_result.failure())
+        
+        if errors:
+            return Failure(errors)
+        return Success(balance_sheet)
 
     @staticmethod
-    def from_journal(journal: 'Journal') -> 'BalanceSheet': # Add type hint for Journal
+    def from_journal(journal: 'Journal') -> Result['BalanceSheet', List[BalanceSheetCalculationError]]: # Add type hint for Journal
         """
         Builds a BalanceSheet from a Journal object.
-        Extracts transactions from the journal and then uses from_transactions.
+        Extracts transactions and uses from_transactions, returning its Result.
         """
         transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
         return BalanceSheet.from_transactions(transactions_only)

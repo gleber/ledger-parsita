@@ -4,6 +4,7 @@ from decimal import Decimal
 from datetime import date
 from pathlib import Path # Import Path
 from returns.maybe import Some, Nothing
+from returns.result import Success, Failure # Import Success and Failure
 
 from src.classes import AccountName, Commodity, Amount, Cost, CostKind, Posting, Transaction
 from src.balance import BalanceSheet, Lot, Account, Balance, CashBalance, AssetBalance # Updated import
@@ -25,7 +26,9 @@ def test_calculate_balances_and_lots_partial_match_gain():
 """
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap() # Updated call
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    result_balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # Verify the remaining quantity of the lot
     xyz_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
@@ -52,7 +55,9 @@ def test_calculate_balances_and_lots_partial_match_loss():
 """
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap() # Updated call
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    result_balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # Verify the remaining quantity of the lot
     abc_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230101"]))
@@ -80,7 +85,9 @@ def test_calculate_balances_and_lots_multiple_postings_same_commodity():
 """
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap() # Updated call
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    result_balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # Verify the remaining quantity of the lot
     xyz_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
@@ -108,7 +115,9 @@ def test_calculate_balances_and_lots_multiple_cash_postings():
 """
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    result_balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # Verify the remaining quantity of the lot
     xyz_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "XYZ", "20230101"]))
@@ -136,10 +145,17 @@ def test_calculate_balances_and_lots_insufficient_lots():
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     
-    with pytest.raises(ValueError) as excinfo:
-        BalanceSheet.from_transactions(transactions_only)
+    result = BalanceSheet.from_transactions(transactions_only)
+    assert isinstance(result, Failure), "Expected BalanceSheet.from_transactions to fail"
+    errors = result.failure()
+    assert len(errors) > 0, "Expected at least one error"
     
-    error_str = str(excinfo.value)
+    # Assuming the relevant error is the first one for this specific test case
+    # In a more complex scenario with multiple potential errors, might need to iterate/filter
+    actual_error = errors[0].original_error 
+    assert isinstance(actual_error, ValueError), f"Expected ValueError, got {type(actual_error)}"
+    
+    error_str = str(actual_error)
     assert "Not enough open lots found" in error_str
     assert "Remaining to match: 5" in error_str
     assert "Account Details (assets:stocks:XYZ for XYZ):" in error_str
@@ -167,7 +183,9 @@ def test_crypto_transfer_no_cash_proceeds():
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
     
     # This should not raise a ValueError
-    balance_sheet = BalanceSheet.from_transactions(transactions_only)
+    result_balance_sheet = BalanceSheet.from_transactions(transactions_only)
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # Assert that no capital gains were realized from this transfer
     assert len(balance_sheet.capital_gains_realized) == 0
@@ -248,7 +266,9 @@ def test_calculate_balances_and_lots_complex_fifo():
     """
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    result_balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # Verify remaining quantities
     abc_account_lot1_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "ABC", "20230101"]))

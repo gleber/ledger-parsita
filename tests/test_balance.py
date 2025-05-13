@@ -4,6 +4,7 @@ from decimal import Decimal
 from datetime import date
 from pathlib import Path # Import Path
 from returns.maybe import Some, Nothing
+from returns.result import Success, Failure # Import Success and Failure
 
 from src.classes import AccountName, Commodity, Amount, Cost, CostKind, Posting, Transaction
 from src.balance import BalanceSheet, Lot, Account, Balance, CashBalance, AssetBalance # Updated import
@@ -38,7 +39,9 @@ def test_calculate_balances_undated_accounts():
         ),
     ]
 
-    balance_sheet = BalanceSheet.from_transactions(transactions) # Updated function call
+    result_balance_sheet = BalanceSheet.from_transactions(transactions) # Updated function call
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # Verify BalanceSheet for undated accounts
     # Balances for non-asset accounts should be from postings
@@ -165,7 +168,9 @@ def test_balance_sheet_building_with_assets(): # Renamed test function
         ),
     ]
 
-    balance_sheet = BalanceSheet.from_transactions(transactions) # Updated function call
+    result_balance_sheet = BalanceSheet.from_transactions(transactions) # Updated function call
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # assets:bank (CashBalance)
     assets_bank_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "bank"]))
@@ -236,7 +241,9 @@ def test_calculate_balances_and_lots_simple_capital_gain():
 """
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap() # Updated call
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    result_balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # Verify the remaining quantity of the lot
     aapl_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
@@ -267,7 +274,9 @@ def test_calculate_balances_and_lots_multiple_opens_single_close():
 """
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap() # Updated call
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    result_balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # Verify the remaining quantity of the lots
     aapl_account_lot1_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
@@ -306,7 +315,9 @@ def test_calculate_balances_and_lots_single_open_multiple_closes():
 """
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap() # Updated call
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    result_balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # Verify the remaining quantity of the lot
     aapl_account_lot1_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
@@ -342,7 +353,9 @@ def test_calculate_balances_and_lots_multiple_assets():
 """
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap() # Updated call
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    result_balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # Verify remaining quantities
     aapl_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "stocks", "AAPL", "20230101"]))
@@ -375,7 +388,9 @@ def test_calculate_balances_and_lots_excludes_non_asset_closing_postings():
 """
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap() # Updated call
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    result_balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # No capital gains should be calculated for non-asset closing postings
     income_account_name = AccountName(parts=["income", "capital_gains"])
@@ -410,7 +425,9 @@ def test_calculate_balances_and_lots_handles_undated_open_accounts():
 """
     journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap() # Updated call
     transactions_only = [entry.transaction for entry in journal.entries if entry.transaction is not None]
-    balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    result_balance_sheet = BalanceSheet.from_transactions(transactions_only) # Updated function call
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_transactions failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     # Verify the remaining quantity of the lot
     btc_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "crypto", "BTC", "20230101"]))

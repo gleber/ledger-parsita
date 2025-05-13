@@ -3,6 +3,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from returns.maybe import Some, Nothing
+from returns.result import Success, Failure # Import Success and Failure
 
 from src.classes import (
     Journal,
@@ -36,7 +37,9 @@ def test_capital_gains_rsu_style_income_then_sale():
 """
     # Using a dummy path as it's not strictly needed for content parsing here
     journal = Journal.parse_from_content(journal_string, Path("test_rsu.journal")).unwrap()
-    balance_sheet = BalanceSheet.from_journal(journal)
+    result_balance_sheet = BalanceSheet.from_journal(journal)
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_journal failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     assert len(balance_sheet.capital_gains_realized) == 1
     gain_result = balance_sheet.capital_gains_realized[0]
@@ -85,7 +88,9 @@ def test_capital_gains_opening_balance_then_partial_sell():
     # Using a dummy path as it's not strictly needed for content parsing here
     # The .unwrap() call will raise an error if parsing fails.
     journal = Journal.parse_from_content(journal_string, Path("test_opening_balance_sell.journal")).unwrap()
-    balance_sheet = BalanceSheet.from_journal(journal)
+    result_balance_sheet = BalanceSheet.from_journal(journal)
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_journal failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     assert len(balance_sheet.capital_gains_realized) == 1
     gain_result = balance_sheet.capital_gains_realized[0]
@@ -137,7 +142,9 @@ def test_capital_gains_opening_balance_then_partial_sell_all():
     assets:broker:tastytrade:SOL:20230101    -10 SOL
 """
     journal = Journal.parse_from_content(journal_string, Path("test_opening_balance_sell.journal")).unwrap().strip_loc()
-    balance_sheet = BalanceSheet.from_journal(journal)
+    result_balance_sheet = BalanceSheet.from_journal(journal)
+    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_journal failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
+    balance_sheet = result_balance_sheet.unwrap()
 
     assert len(balance_sheet.capital_gains_realized) == 1
 
@@ -154,12 +161,19 @@ def test_capital_gains_opening_balance_without_cost_then_partial_sell():
 
 2023-12-29 Sold 25 SOL/USD @ 105.30
   assets:broker:tastytrade  2632.50 USD
-  assets:broker:tastytrade  -25 SOL @ 105.30 USD
+    assets:broker:tastytrade  -25 SOL @ 105.30 USD
 """
     journal = Journal.parse_from_content(journal_string, Path("test_opening_balance_sell.journal")).unwrap().strip_loc()
-    with pytest.raises(ValueError) as excinfo:
-        BalanceSheet.from_journal(journal)
-
-    assert "No lots found for assets:broker:tastytrade:SOL to match sale" in str(excinfo.value)
-    assert "Possible reason: The initial balance for SOL in this account might have been asserted without a cost basis" in str(excinfo.value)
-    assert "Please ensure all opening balances for assets include a cost basis using '@@' (total cost) or '@' (per-unit cost)" in str(excinfo.value)
+    result = BalanceSheet.from_journal(journal)
+    assert isinstance(result, Failure), "Expected BalanceSheet.from_journal to fail"
+    errors = result.failure()
+    assert len(errors) > 0, "Expected at least one error"
+    
+    # Assuming the relevant error is the first one for this specific test case
+    actual_error = errors[0].original_error 
+    assert isinstance(actual_error, ValueError), f"Expected ValueError, got {type(actual_error)}"
+    
+    error_str = str(actual_error)
+    assert "No lots found for assets:broker:tastytrade:SOL to match sale" in error_str
+    assert "Possible reason: The initial balance for SOL in this account might have been asserted without a cost basis" in error_str
+    assert "Please ensure all opening balances for assets include a cost basis using '@@' (total cost) or '@' (per-unit cost)" in error_str

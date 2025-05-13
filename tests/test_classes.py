@@ -146,7 +146,7 @@ def test_validate_internal_consistency_valid():
             Posting(account=AccountName(["Expenses", "Food"]), amount=Amount(Decimal("100"), Commodity("USD"))),
         ]
     )
-    assert isinstance(tx.validate_internal_consistency(), Success)
+    assert isinstance(tx.verify_integrity(), Success) # Changed
 
 def test_validate_internal_consistency_missing_date():
     tx = Transaction(
@@ -157,7 +157,7 @@ def test_validate_internal_consistency_missing_date():
             Posting(account=AccountName(["Expenses", "Food"]), amount=Amount(Decimal("100"), Commodity("USD"))),
         ]
     )
-    result = tx.validate_internal_consistency()
+    result = tx.verify_integrity() # Changed
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), MissingDateError)
 
@@ -170,7 +170,7 @@ def test_validate_internal_consistency_missing_payee_str():
             Posting(account=AccountName(["Expenses", "Food"]), amount=Amount(Decimal("100"), Commodity("USD"))),
         ]
     )
-    result = tx.validate_internal_consistency()
+    result = tx.verify_integrity() # Changed
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), MissingDescriptionError)
 
@@ -183,7 +183,7 @@ def test_validate_internal_consistency_invalid_payee_type():
             Posting(account=AccountName(["Expenses", "Food"]), amount=Amount(Decimal("100"), Commodity("USD"))),
         ]
     )
-    result = tx.validate_internal_consistency()
+    result = tx.verify_integrity() # Changed
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), MissingDescriptionError)
     assert "invalid type" in str(result.failure())
@@ -195,7 +195,7 @@ def test_validate_internal_consistency_insufficient_postings_none():
         payee="Valid Payee",
         postings=[] # No postings
     )
-    result = tx.validate_internal_consistency()
+    result = tx.verify_integrity() # Changed
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), InsufficientPostingsError)
 
@@ -207,7 +207,7 @@ def test_validate_internal_consistency_insufficient_postings_one():
             Posting(account=AccountName(["Assets", "Bank"]), amount=Amount(Decimal("-100"), Commodity("USD"))),
         ] # Only one posting
     )
-    result = tx.validate_internal_consistency()
+    result = tx.verify_integrity() # Changed
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), InsufficientPostingsError)
 
@@ -220,7 +220,7 @@ def test_validate_internal_consistency_invalid_posting_item_type():
             "not a posting" # type: ignore
         ]
     )
-    result = tx.validate_internal_consistency()
+    result = tx.verify_integrity() # Changed
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), InvalidPostingError)
     assert "Item at index 1" in str(result.failure())
@@ -235,7 +235,7 @@ def test_validate_internal_consistency_invalid_posting_account_type():
             Posting(account="NotAnAccountName", amount=Amount(Decimal("100"), Commodity("USD"))), # type: ignore
         ]
     )
-    result = tx.validate_internal_consistency()
+    result = tx.verify_integrity() # Changed
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), InvalidPostingError)
     assert "Posting 1 has an invalid account type" in str(result.failure())
@@ -249,7 +249,7 @@ def test_validate_internal_consistency_invalid_posting_amount_type():
             Posting(account=AccountName(["Expenses", "Food"]), amount="NotAnAmount"), # type: ignore
         ]
     )
-    result = tx.validate_internal_consistency()
+    result = tx.verify_integrity() # Changed
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), InvalidPostingError)
     assert "Posting 1 has an invalid amount type" in str(result.failure())
@@ -263,7 +263,7 @@ def test_validate_internal_consistency_invalid_posting_amount_quantity_type():
             Posting(account=AccountName(["Expenses", "Food"]), amount=Amount(quantity="NotADecimal", commodity=Commodity("USD"))), # type: ignore
         ]
     )
-    result = tx.validate_internal_consistency()
+    result = tx.verify_integrity() # Changed
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), InvalidPostingError)
     assert "Posting 1 amount quantity is not a Decimal" in str(result.failure())
@@ -277,7 +277,7 @@ def test_validate_internal_consistency_invalid_posting_amount_commodity_type():
             Posting(account=AccountName(["Expenses", "Food"]), amount=Amount(quantity=Decimal("100"), commodity="NotACommodity")), # type: ignore
         ]
     )
-    result = tx.validate_internal_consistency()
+    result = tx.verify_integrity() # Changed
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), InvalidPostingError)
     assert "Posting 1 amount commodity is not a Commodity" in str(result.failure())
@@ -291,7 +291,7 @@ def test_validate_internal_consistency_posting_amount_is_none_valid():
             Posting(account=AccountName(["Expenses", "Food"]), amount=None), # Elided amount
         ]
     )
-    assert isinstance(tx.validate_internal_consistency(), Success)
+    assert isinstance(tx.verify_integrity(), Success) # Changed
 
 
 # --- Test Cases for Transaction.balance() and Transaction.is_balanced() ---
