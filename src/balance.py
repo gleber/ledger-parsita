@@ -1,18 +1,19 @@
 import functools
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Dict, List, Union, Optional, Generator # Import Generator
+from typing import Dict, List, Union, Optional, Generator
 import datetime
 from returns.result import Result, Success, Failure
 from returns.maybe import Maybe, Some, Nothing
 from datetime import date
-from collections import defaultdict # Import defaultdict
+from collections import defaultdict
 
 from src.classes import (
     AccountName, Amount, Commodity, Posting, Transaction, Cost, CostKind, 
-    CommodityKind, CapitalGainResult, Comment, Journal, SourceLocation, # Added SourceLocation
-    VerificationError, BalanceSheetCalculationError # Import new error types
+    CommodityKind, CapitalGainResult, Comment, SourceLocation,
+    VerificationError, BalanceSheetCalculationError
 )
+from src.journal import Journal
 
 
 @dataclass

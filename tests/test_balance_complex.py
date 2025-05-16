@@ -8,7 +8,7 @@ from returns.result import Success, Failure # Import Success and Failure
 
 from src.classes import AccountName, Commodity, Amount, Cost, CostKind, Posting, Transaction
 from src.balance import BalanceSheet, Lot, Account, Balance, CashBalance, AssetBalance # Updated import
-from src.classes import Journal # Import Journal
+from src.journal import Journal
 
 
 def test_calculate_balances_and_lots_partial_match_gain():

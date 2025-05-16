@@ -11,7 +11,6 @@ from src.classes import (
     CommodityDirective,
     CostKind,
     Include,
-    Journal, # Import Journal
     JournalEntry,
     Status,
     AccountName,
@@ -24,6 +23,7 @@ from src.classes import (
     MarketPrice,
     Comment,
 )
+from src.journal import Journal
 
 
 TEST_INCLUDES_DIR = Path("tests/includes")

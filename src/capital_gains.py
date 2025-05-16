@@ -3,7 +3,8 @@ from decimal import Decimal
 import re
 import datetime
 
-from src.classes import Journal, Transaction, Posting, AccountName, Amount, Commodity, SourceLocation
+from src.classes import Transaction, Posting, AccountName, Amount, Commodity, SourceLocation
+from src.journal import Journal
 from src.balance import BalanceSheet, AssetBalance, CashBalance, Lot # Import BalanceSheet, Balance types, and Lot
 
 def find_open_transactions(journal: Journal) -> List[Transaction]:

@@ -1,9 +1,10 @@
 import pytest
-from pathlib import Path # Import Path
-from src.balance import BalanceSheet, Account, CashBalance # Import BalanceSheet, Account, and CashBalance
-from src.classes import Amount, Commodity, AccountName, Journal # Import Journal
-from decimal import Decimal # Import Decimal
-from returns.result import Success, Failure # Import Success and Failure
+from pathlib import Path
+from src.balance import BalanceSheet, Account, CashBalance
+from src.classes import Amount, Commodity, AccountName
+from src.journal import Journal
+from decimal import Decimal
+from returns.result import Success, Failure
 
 # Simplified mock data
 mock_balance_sheet = BalanceSheet(

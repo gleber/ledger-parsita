@@ -25,13 +25,13 @@ from src.classes import (
     Status,
     AccountDirective,
     JournalEntry,
-    Journal,
     SourceLocation,
     PositionAware,
     CommodityDirective,
     Alias,
     MarketPrice,
 )
+from src.journal import Journal
 
 from abc import abstractmethod
 from typing import Generic, Optional, TypeVar, Union

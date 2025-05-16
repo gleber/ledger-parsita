@@ -6,7 +6,6 @@ from returns.maybe import Some, Nothing
 from returns.result import Success, Failure # Import Success and Failure
 
 from src.classes import (
-    Journal,
     Transaction,
     Posting,
     AccountName,
@@ -18,6 +17,7 @@ from src.classes import (
     Cost,
     CapitalGainResult
 )
+from src.journal import Journal
 from src.balance import BalanceSheet, CashBalance, AssetBalance
 
 

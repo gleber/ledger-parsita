@@ -1,4 +1,5 @@
-from src.classes import Amount, Commodity, AccountName, Tag, Cost, CostKind, CommodityDirective, AccountDirective, Alias, MarketPrice, Include, Posting, Transaction, JournalEntry, Journal, Comment, Status
+from src.classes import Amount, Commodity, AccountName, Tag, Cost, CostKind, CommodityDirective, AccountDirective, Alias, MarketPrice, Include, Posting, Transaction, JournalEntry, Comment, Status
+from src.journal import Journal
 from decimal import Decimal
 from datetime import date, datetime
 import pytest

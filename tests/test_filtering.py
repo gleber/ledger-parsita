@@ -8,9 +8,9 @@ from src.classes import (
     Amount,
     Commodity,
     JournalEntry,
-    Journal,
     Tag,
 )
+from src.journal import Journal
 from src.filtering import (
     matches_query,
     filter_entries,

@@ -1,5 +1,6 @@
 from pathlib import Path
-from src.classes import Journal, JournalEntry, Transaction, Include, AccountName, Amount, Commodity, SourceLocation # Updated import
+from src.classes import JournalEntry, Transaction, Include, AccountName, Amount, Commodity, SourceLocation
+from src.journal import Journal
 from datetime import date
 from decimal import Decimal
 import pytest

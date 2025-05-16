@@ -5,7 +5,8 @@ from typing import Optional, Union, List
 import click
 import pprint
 from pathlib import Path
-from src.classes import Journal, JournalEntry, VerificationError # Updated import
+from src.classes import JournalEntry, VerificationError # Updated import
+from src.journal import Journal
 import re
 from parsita import ParseError
 from src.classes import Posting, Transaction, sl, AccountName # Import AccountName
