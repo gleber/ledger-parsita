@@ -18,258 +18,43 @@ from parsita import ParseError, ParserContext, Parser, Reader, lit, reg, rep, re
 from parsita.state import Continue, Input, Output, State # Import from parsita.state
 from parsita.util import splat # Import splat
 
-# Error types for Transaction validation and balancing
-class TransactionValidationError(Exception):
-    """Base class for transaction validation and balancing errors."""
-    pass
-
-class TransactionIntegrityError(TransactionValidationError):
-    """For issues with the basic structure or completeness of the Transaction object itself."""
-    pass
-
-class MissingDateError(TransactionIntegrityError):
-    def __init__(self, message: str = "Transaction date is missing or invalid."):
-        super().__init__(message)
-
-class MissingDescriptionError(TransactionIntegrityError):
-    def __init__(self, message: str = "Transaction payee/description is missing or empty."):
-        super().__init__(message)
-
-class InsufficientPostingsError(TransactionIntegrityError):
-    def __init__(self, message: str = "Transaction must have at least two postings."):
-        super().__init__(message)
-
-class InvalidPostingError(TransactionIntegrityError):
-    def __init__(self, message: str):
-        super().__init__(message)
-
-class TransactionBalanceError(TransactionValidationError):
-    """For issues related to the sum of posting amounts."""
-    pass
-
-class ImbalanceError(TransactionBalanceError):
-    def __init__(self, commodity: "Commodity", balance_sum: Decimal):
-        self.commodity = commodity
-        self.balance_sum = balance_sum
-        super().__init__(f"Transaction does not balance for commodity {commodity}. Sum is {balance_sum}")
-
-class AmbiguousElidedAmountError(TransactionBalanceError):
-    def __init__(self, commodity: "Commodity"):
-        self.commodity = commodity
-        super().__init__(f"More than one elided amount for commodity {commodity}, cannot infer balance")
-
-class UnresolvedElidedAmountError(TransactionBalanceError):
-    def __init__(self, commodity: "Commodity"):
-        self.commodity = commodity
-        super().__init__(f"Cannot resolve elided amount for commodity {commodity}.")
-
-class NoCommoditiesElidedError(TransactionBalanceError):
-    def __init__(self, message: str = "Cannot resolve elided amount as no commodities are present in the transaction"):
-        super().__init__(message)
-
-class MultipleCommoditiesRemainingError(TransactionBalanceError):
-    def __init__(self, commodities: List["Commodity"], message: Optional[str] = None): # Fixed type hint
-        self.commodities = commodities
-        if message is None:
-            if commodities:
-                commodity_str = ", ".join(str(c) for c in commodities)
-                message = f"Cannot resolve remaining elided amounts due to multiple commodities present: {commodity_str}."
-            else:
-                message = "Cannot resolve remaining elided amounts due to multiple commodities present in the transaction."
-        super().__init__(message)
-
-# Verification Error Types
-class VerificationError(Exception):
-    """Base class for journal-level verification errors."""
-    def __init__(self, message: str, source_location: Optional["SourceLocation"] = None):
-        self.source_location = source_location
-        super().__init__(message)
-
-    def __str__(self):
-        loc_str = f" at {self.source_location.filename}:{self.source_location.line}:{self.source_location.column}" if self.source_location and self.source_location.line is not None else ""
-        # Ensure message is stringified properly before concatenation
-        base_message = super().__str__()
-        return f"{base_message}{loc_str}"
-
-
-class AcquisitionMissingDatedSubaccountError(VerificationError):
-    """Error for stock/option acquisition posting not using a dated subaccount."""
-    def __init__(self, posting: "Posting"):
-        message = f"Stock/option acquisition posting for '{posting.amount.commodity}' to account '{posting.account}' does not use a dated subaccount (YYYYMMDD)"
-        super().__init__(message, posting.source_location)
-
-class BalanceSheetCalculationError(VerificationError):
-    """Error during balance sheet calculation."""
-    # This will likely wrap other errors like ValueError or Failure contents
-    def __init__(self, original_error: Exception, source_location: Optional["SourceLocation"] = None):
-        self.original_error = original_error
-        message = f"Balance sheet calculation failed: {original_error}"
-        super().__init__(message, source_location)
-
+# Import error classes from the new errors module
+from .errors import (
+    TransactionValidationError,
+    TransactionIntegrityError,
+    MissingDateError,
+    MissingDescriptionError,
+    InsufficientPostingsError,
+    InvalidPostingError,
+    TransactionBalanceError,
+    ImbalanceError,
+    AmbiguousElidedAmountError,
+    UnresolvedElidedAmountError,
+    NoCommoditiesElidedError,
+    MultipleCommoditiesRemainingError,
+    VerificationError,
+    AcquisitionMissingDatedSubaccountError,
+    BalanceSheetCalculationError,
+)
+# Import common types from the new common_types module
+from .common_types import (
+    SourceCacheManager,
+    source_cache_manager,
+    PositionAware,
+    CostKind,
+    SourceLocation,
+    sl,
+    Comment,
+    CommodityKind,
+    AmountStyle,
+    Price,
+    Status,
+    Tag,
+)
 
 CASH_TICKERS = ["USD", "PLN", "EUR"]
 CRYPTO_TICKERS = ["BTC", "ETH", "XRP", "LTC", "BCH", "ADA", "DOT", "UNI", "LINK", "SOL", "PseudoUSD", "BUSD", "FDUSD", "USDT", "USDC", "FTM", "ALGO"]
 SIMPLE_CURRENCIES = ["$"]
-
-class SourceCacheManager:
-    """Manages caching of file content and newline offsets for efficient position lookup."""
-
-    def __init__(self):
-        self._content_cache: Dict[Path, str] = {}
-        self._newline_offsets_cache: Dict[Path, List[int]] = {}
-
-    def get_content(self, filename: Path, file_content: Optional[str]) -> str:
-        """Reads and caches file content if not already cached."""
-        resolved_path = filename.resolve()
-        if resolved_path not in self._content_cache:
-            content = file_content or resolved_path.read_text()
-            self._content_cache[resolved_path] = content
-            self._newline_offsets_cache[resolved_path] = [i for i, char in enumerate(content) if char == '\n']
-        return self._content_cache[resolved_path]
-
-    def get_newline_offsets(self, filename: Path, file_content: Optional[str]) -> List[int]:
-        """Returns cached newline offsets, ensuring content is cached first."""
-        resolved_path = filename.resolve()
-        if resolved_path not in self._newline_offsets_cache:
-             # Ensure content and offsets are cached
-            self.get_content(filename, file_content)
-        return self._newline_offsets_cache[resolved_path]
-
-    def calculate_line_column(self, filename: Path, file_content: Optional[str], offset: int) -> tuple[int, int]:
-        """Calculates 1-based line and column using cached newline offsets."""
-        newline_offsets = self.get_newline_offsets(filename, file_content)
-
-        # Find the index of the newline character immediately preceding the offset
-        # bisect_left finds the insertion point to maintain order, which is the index
-        # of the first element greater than or equal to offset.
-        # We want the index of the newline *before* the offset, so we subtract 1.
-        line_index = bisect.bisect_left(newline_offsets, offset)
-
-        # The line number is 1-based, so it's the index + 1
-        line = line_index + 1
-
-        # The column number is the offset relative to the start of the current line.
-        # The start of the current line is the offset of the previous newline + 1.
-        # If it's the first line (line_index == 0), the start offset is 0.
-        start_of_line_offset = newline_offsets[line_index - 1] + 1 if line_index > 0 else 0
-        column = offset - start_of_line_offset + 1 # Column is also 1-based
-
-        return line, column
-
-# Global instance (not a true singleton with __init__)
-source_cache_manager = SourceCacheManager()
-
-
-class PositionAware(Generic[Output]):
-    """An object which can cooperate with the positioned parser.
-
-    The ``positioned`` parser calls the ``set_position`` method on values it
-    receives. This abstract base class marks those objects that can cooperate
-    with ``positioned`` in this way and receive the input position to produce
-    the final value.
-    """
-
-    source_location: Optional["SourceLocation"] = None
-
-    def set_position(self, start: int, length: int) -> Self:
-        return replace(  # type: ignore
-            self,
-            source_location=SourceLocation(filename=Path(""), offset=start, length=length),
-        )
-
-    def strip_loc(self):
-        stripped_fields = {
-            # Mypy can't handle self well
-            field.name: getattr(self, field.name)
-            for field in fields(self)  # type: ignore
-        }
-
-        def strip_one(v):
-            if v is None:  # Add check for None
-                return None
-            if isinstance(v, PositionAware):
-                return v.strip_loc()
-            if isinstance(v, Iterable) and not isinstance(v, str):
-                return [strip_one(i) for i in v]
-            return v
-
-        for k in stripped_fields.keys():
-            stripped_fields[k] = strip_one(stripped_fields[k])
-        stripped_fields["source_location"] = None
-        # mypy can't handle self well
-        return replace(self, **stripped_fields)  # type: ignore
-
-    def set_filename(self, filename: Path, file_content: str) -> Self:
-        # mypy can't handle self well
-        sub_fields = {field.name: getattr(self, field.name) for field in fields(self)}  # type: ignore
-
-        def set_one(v):
-            if isinstance(v, PositionAware):
-                return v.set_filename(filename, file_content)
-            if isinstance(v, Iterable) and not isinstance(v, str):
-                return [set_one(i) for i in v]
-            return v
-
-        for k in sub_fields.keys():
-            sub_fields[k] = set_one(sub_fields[k])
-        if "source_location" not in sub_fields:
-            raise Exception(f"{self} does not have source_location!")
-        sl = sub_fields["source_location"]
-        if isinstance(sl, SourceLocation) and sl is not None:
-            start_offset = sl.offset
-            length = sl.length
-            # Use the singleton cache manager to calculate line and column
-            line, column = source_cache_manager.calculate_line_column(filename, file_content, start_offset)
-            sub_fields["source_location"] = SourceLocation(
-                filename=filename.resolve(),
-                offset=start_offset,
-                length=length,
-                line=line,
-                column=column,
-            )
-        # mypy can't handle self well
-        return replace(self, **sub_fields) # type: ignore
-
-
-class CostKind(Enum):
-    UnitCost = "@"
-    TotalCost = "@@"
-
-    def __str__(self):
-        return self.value
-
-
-@dataclass
-class SourceLocation:
-    """A location in a source file"""
-
-    filename: Path
-    offset: int
-    length: int
-    line: Optional[int] = None
-    column: Optional[int] = None
-
-
-def sl(sl: SourceLocation | None) -> SourceLocation:
-    if sl is None:
-        return SourceLocation(Path(""), 0, 0, None, None)
-    return sl
-
-
-@dataclass
-class Comment(PositionAware["Comment"]):
-    comment: str
-    source_location: Optional["SourceLocation"] = None
-
-    def to_journal_string(self) -> str:
-        return f"; {self.comment}"
-
-
-class CommodityKind(Enum):
-    CASH = "CASH"
-    CRYPTO = "CRYPTO"
-    OPTION = "OPTION"
-    STOCK = "STOCK"
 
 
 @dataclass(eq=False)
@@ -306,11 +91,11 @@ class Commodity(PositionAware["Commodity"]):
 
     def isCash(self) -> bool:
         """Checks if the commodity is a cash commodity (USD or PLN)."""
-        return self.name in CASH_TICKERS
+        return self.name in ["USD", "PLN", "EUR"] # Use hardcoded cash tickers for now
 
     def isCrypto(self) -> bool:
         """Checks if the commodity is a cryptocurrency."""
-        return self.name in CRYPTO_TICKERS
+        return self.name in ["BTC", "ETH", "XRP", "LTC", "BCH", "ADA", "DOT", "UNI", "LINK", "SOL", "PseudoUSD", "BUSD", "FDUSD", "USDT", "USDC", "FTM", "ALGO"] # Use hardcoded crypto tickers for now
 
     def isStock(self) -> bool:
         """Checks if the commodity is likely a stock (simple ticker check)."""
@@ -371,12 +156,6 @@ class CapitalGainResult:
     closing_date: date # Add closing date
     acquisition_date: date # Add acquisition date
 
-@dataclass
-class AmountStyle(PositionAware["AmountStyle"]):
-    """Style of an amount"""
-
-    source_location: Optional["SourceLocation"] = None
-
 
 @dataclass
 class Cost(PositionAware["Cost"]):
@@ -435,36 +214,6 @@ class AccountName(PositionAware["AccountName"]):
 
     def __hash__(self):
         return hash(tuple(self.parts))
-
-
-class Status(Enum):
-    """The status of a transaction or posting"""
-
-    Unmarked = ""
-    Pending = "!"
-    Cleared = "*"
-
-    def __str__(self):
-        return self.value
-
-
-@dataclass(unsafe_hash=True)
-class Tag(PositionAware["Tag"]):
-    """A tag"""
-
-    name: str
-    value: Optional[str] = None
-    source_location: Optional["SourceLocation"] = None
-
-    def __str__(self):
-        if self.value:
-            return f"{self.name}:{self.value}"
-        return f"{self.name}"
-
-    def to_journal_string(self) -> str:
-        if self.value:
-            return f"{self.name}:{self.value}"
-        return self.name
 
 
 @dataclass
@@ -542,7 +291,7 @@ class Posting(PositionAware["Posting"]):
 
         return s.strip()  # Remove any potential trailing whitespace
 
-    def add_comment(self, comment_to_add: "Comment") -> "Posting":
+    def add_comment(self, comment_to_add: Comment) -> "Posting":
         """Adds a comment to the posting, appending to any existing comment."""
         if self.comment:
             # Append to existing comment
@@ -792,7 +541,10 @@ class Transaction(PositionAware["Transaction"]):
 
         if not elided_postings_indices: # No elided amounts
             imbalances = {comm: sm for comm, sm in commodity_sums.items() if sm != Decimal(0)}
-            
+
+            print(f"DEBUG: commodity_sums: {commodity_sums}")
+            print(f"DEBUG: imbalances: {imbalances}")
+
             if not imbalances: # Already balanced
                 return Success(current_tx_copy)
 
@@ -806,9 +558,11 @@ class Transaction(PositionAware["Transaction"]):
                     )
                 
                 # Create a new transaction with these equity postings added
-                final_postings = current_tx_copy.postings + inferred_equity_postings
+                final_postings = []
+                final_postings.extend(current_tx_copy.postings)
+                final_postings.extend(inferred_equity_postings)
                 augmented_tx = replace(current_tx_copy, postings=final_postings)
-                
+
                 # Return the augmented transaction
                 return Success(augmented_tx)
             else: # More than 2 imbalances, cannot infer equity simply
@@ -999,16 +753,6 @@ class AccountDirective(PositionAware["AccountDirective"]):
         if self.comment:
             s += f" {self.comment.to_journal_string()}"
         return s
-
-
-@dataclass
-class Price(PositionAware["Price"]):
-    """A price"""
-
-    date: date
-    commodity: Commodity
-    amount: Amount
-    source_location: Optional["SourceLocation"] = None
 
 
 @dataclass

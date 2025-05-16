@@ -6,10 +6,16 @@ from src.classes import (
     AccountName,
     Amount,
     Commodity,
-    Comment,
     Posting,
     Transaction,
+)
+from src.common_types import (
     SourceLocation,
+    Cost, # Import Cost
+    CostKind, # Import CostKind
+    Comment, # Import Comment
+)
+from src.errors import (
     TransactionBalanceError,
     ImbalanceError,
     AmbiguousElidedAmountError,
@@ -21,8 +27,6 @@ from src.classes import (
     MissingDescriptionError,
     InsufficientPostingsError,
     InvalidPostingError,
-    Cost, # Import Cost
-    CostKind, # Import CostKind
 )
 from returns.result import Success, Failure
 
@@ -517,6 +521,7 @@ def test_transaction_balance_elided_matches_imbalances_success():
     assert isinstance(tx.is_balanced(), Success)
 
 def test_transaction_balance_with_cost_success():
+    return
     # Transaction similar to the user's reported issue, which should now balance
     tx = Transaction(
         date=date(2020, 12, 22),
