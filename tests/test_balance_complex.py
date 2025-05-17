@@ -297,3 +297,29 @@ def test_calculate_balances_and_lots_complex_fifo():
     assert isinstance(abc_balance_lot3, AssetBalance)
     assert len(abc_balance_lot3.lots) == 1
     assert abc_balance_lot3.lots[0].remaining_quantity == Decimal("5") # 5 initial - 0 sold
+
+def test_two_step_balance_conversion():
+    """Tests the conversion of a balance sheet to a different currency."""
+    journal_string = """
+2000-01-01 * Opening Balance
+  assets:broker:tastytrade:NVTA            200.0 NVTA @@ 200.0 USD
+
+2024-02-15 Symbol change:  Close 200.0 NVTA
+  assets:broker:tastytrade:NVTA:20240215  -200.0 NVTA
+  equity:conversion:tastytrade             200.0 NVTA
+
+2024-02-15 Symbol change:  Open 200.0 NVTAQ
+  assets:broker:tastytrade:NVTAQ:20240215  200.0 NVTAQ
+  equity:conversion:tastytrade            -200.0 NVTAQ
+"""
+    journal = Journal.parse_from_content(journal_string, Path("a.journal")).unwrap()
+    balance = BalanceSheet.from_journal(journal).unwrap()
+
+    assert balance.format_account_flat() == [
+        "assets:broker:tastytrade:NVTAQ:20240215",
+        "  Own: 200.00 NVTAQ | Total: 200.00 NVTAQ",
+        "assets:broker:tastytrade:NVTA",
+        "  Own: -200.00 NVTA | Total: -200.00 NVTA",
+        "equity:conversion:tastytrade",
+        "  Own: 0.00 USD | Total: 0.00 USD",
+    ]

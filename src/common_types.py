@@ -250,3 +250,6 @@ class PositionEffect(Enum):
     CLOSE_SHORT = "close_short"
     ASSERT_BALANCE = "assert_balance"
     CASH_MOVEMENT = "cash_movement"
+
+    def is_open(self) -> bool:
+        return self in (self.OPEN_LONG, self.OPEN_SHORT)

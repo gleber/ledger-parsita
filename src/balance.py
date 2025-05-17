@@ -42,7 +42,12 @@ class Lot:
         position_effect = posting.get_effect()
 
         # Lot creation from balance assertion (always long)
-        if posting.balance and posting.balance.quantity > 0 and posting.cost:
+        if position_effect == PositionEffect.ASSERT_BALANCE:
+            assert posting.balance is not None, "Balance assertion must have a balance"
+            if posting.cost is None and not posting.balance.commodity.isCash():
+                raise ValueError(
+                    f"Balance assertion for {posting.account.name} on {transaction.date} must have a cost or be a cash commodity."
+                )
             cost_to_use: Maybe[Cost] = Maybe.from_optional(posting.cost)
             
             cost_basis_per_unit_maybe: Maybe[Amount] = cost_to_use.bind(
@@ -63,17 +68,20 @@ class Lot:
             )
 
         # Lot creation from regular transaction posting (long or short)
-        elif posting.amount and (position_effect == PositionEffect.OPEN_LONG or position_effect == PositionEffect.OPEN_SHORT):
+        elif position_effect.is_open():
+            assert posting.amount is not None, "Posting must have an amount for lot creation"
+            print(f"Creating lot from posting: {posting.account.name} {posting.amount} for transaction {transaction.date} - {transaction.payee}...")
             # For OPEN_LONG, cost is purchase cost.
             # For OPEN_SHORT, 'cost' (from posting.cost or inferred) represents proceeds.
             cost_or_proceeds_maybe: Maybe[Cost] = Maybe.from_optional(transaction.get_posting_cost(posting))
-
+            print(f"Cost/Proceeds for lot creation: {cost_or_proceeds_maybe}")
             value_per_unit_maybe: Maybe[Amount] = cost_or_proceeds_maybe.bind(
                 lambda c:
                     Some(Amount(abs(c.amount.quantity / posting.amount.quantity), c.amount.commodity)) # type: ignore
                     if c.kind == CostKind.TotalCost and posting.amount and posting.amount.quantity != 0 # type: ignore
                     else (Some(c.amount) if c.kind == CostKind.UnitCost else Nothing)
             )
+            print(f"Value per unit for lot creation: {value_per_unit_maybe}")
             
             is_short_lot = position_effect == PositionEffect.OPEN_SHORT
             
@@ -95,7 +103,7 @@ class Lot:
                     is_short=is_short_lot
                 )
             )
-        
+        print(f"Lot creation failed for posting: {posting.account.name} {posting.amount} for transaction {transaction.date} - {transaction.payee}")
         return Nothing
 
 @dataclass
@@ -117,6 +125,9 @@ class CashBalance(Balance):
                 raise ValueError("Cannot add amounts of different commodities")
             else:
                 self.total_amount = Amount(self.total_amount.quantity + posting.amount.quantity, self.total_amount.commodity)
+    
+    def __str__(self) -> str:
+        return f"cash balance: {self.total_amount}"
 
 @dataclass
 class AssetBalance(Balance):
@@ -146,7 +157,7 @@ class AssetBalance(Balance):
         self.lots.append(lot)
     
     def __str__(self) -> str:
-        return f"asset balance: {self.commodity} {self.total_amount} {self.cost_basis_per_unit}"
+        return f"asset balance: {self.total_amount} @ {self.cost_basis_per_unit}"
 
 
 @dataclass
@@ -363,6 +374,8 @@ class BalanceSheet:
         """Applies direct effects of a posting: updates own balance, creates lots for acquisitions."""
         account_node = self.get_or_create_account(posting.account)
         
+        print(f"Applying posting effects for {posting.account.name} in transaction {transaction.date} - {transaction.payee}")
+
         commodity_to_use: Optional[Commodity] = None
         if posting.amount:
             commodity_to_use = posting.amount.commodity
@@ -376,7 +389,7 @@ class BalanceSheet:
 
         # Attempt to create a lot using the new static method
         maybe_new_lot: Maybe[Lot] = Lot.try_create_from_posting(posting, transaction)
-        
+
         lot_created_and_processed = False
         if isinstance(balance_obj, AssetBalance):
             # Define a function to process the lot if it exists
@@ -400,12 +413,11 @@ class BalanceSheet:
             if isinstance(balance_obj, CashBalance):
                 balance_obj.add_posting(posting) # Updates CashBalance.total_amount
             elif isinstance(balance_obj, AssetBalance) and position_effect == PositionEffect.CLOSE_LONG: # Sale of a long asset
-                # Reduce asset quantity. AssetBalance.total_amount is directly affected.
-                balance_obj.total_amount = Amount(balance_obj.total_amount.quantity + posting.amount.quantity, balance_obj.commodity)
+                balance_obj.total_amount += posting.amount
             elif isinstance(balance_obj, AssetBalance) and position_effect == PositionEffect.CLOSE_SHORT: # Covering a short asset
-                balance_obj.total_amount = Amount(balance_obj.total_amount.quantity + posting.amount.quantity, balance_obj.commodity)
+                balance_obj.total_amount += posting.amount
             else:
-                print(f"Unknown posting effect {posting} for {balance_obj}")
+                raise ValueError(f"Unknown posting effect {posting.to_journal_string()} for {balance_obj} in\n{transaction.to_journal_string()}")
 
             # Propagate all other posting amounts that were not part of lot creation via balance assertion or opening.
             account_node._propagate_total_balance_update(posting.amount)
@@ -884,14 +896,15 @@ class BalanceSheet:
         print(f"Applying {len(sorted_transactions)} transactions to balance sheet...")
 
         for transaction in sorted_transactions:
-            print(f"Processing transaction: {transaction.to_journal_string()}")
+            # print(f"Processing transaction: {transaction.to_journal_string()}")
             apply_result = balance_sheet.apply_transaction(transaction)
             if isinstance(apply_result, Failure):
                 # apply_transaction now returns Failure(BalanceSheetCalculationError)
                 errors.append(apply_result.failure())
             else:
-                print(f"Resulting balance: {"\n".join(apply_result.unwrap().format_account_flat())}")
-        
+                # print(f"Resulting balance: {"\n".join(apply_result.unwrap().format_account_flat())}")
+                pass
+
         if errors:
             return Failure(errors)
         return Success(balance_sheet)

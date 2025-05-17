@@ -157,7 +157,6 @@ class Posting(PositionAware["Posting"]):
 
         is_cash_commodity = self.amount.commodity.isCash()
         has_short_tag = any(tag.name == "type" and tag.value == "short" for tag in self.tags)
-
        
         if is_cash_commodity:
             return PositionEffect.CASH_MOVEMENT
@@ -165,13 +164,11 @@ class Posting(PositionAware["Posting"]):
         if self.amount.quantity > 0:  # Buying or covering short
             if has_short_tag: # Short tag is both for opening shorts and closing shorts.
                 return PositionEffect.CLOSE_SHORT
-            # If not tagged short, it's either opening a long.
             return PositionEffect.OPEN_LONG # Could also be CLOSE_SHORT
         elif self.amount.quantity < 0:  # Selling or opening short
             if has_short_tag:
                 return PositionEffect.OPEN_SHORT
-            else:
-                return PositionEffect.CLOSE_LONG # Could also be OPEN_SHORT if not tagged, but less likely by convention
+            return PositionEffect.CLOSE_LONG # Could also be OPEN_SHORT if not tagged, but less likely by convention
 
         return PositionEffect.UNKNOWN
 
