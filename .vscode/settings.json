@@ -2,5 +2,8 @@
     "mypy-type-checker.args": [
         "--show-column-numbers",
         "--check-untyped-defs"
-    ]
+    ],
+    "editor.codeActionsOnSave": {
+        
+    }
 }

@@ -6,11 +6,8 @@
 		}
 	],
 	"settings": {
-		"github.copilot.enable": {
-			"*": true,
-			"plaintext": false,
-			"markdown": false,
-			"scminput": false
+		"editor.codeActionsOnSave": {
+			"source.fixAll": "always"
 		}
 	}
 }

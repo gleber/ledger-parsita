@@ -240,3 +240,13 @@ class Tag(PositionAware["Tag"]):
         if self.value:
             return f"{self.name}:{self.value}"
         return self.name
+
+
+class PositionEffect(Enum):
+    UNKNOWN = "unknown"
+    OPEN_LONG = "open_long"
+    CLOSE_LONG = "close_long"
+    OPEN_SHORT = "open_short"
+    CLOSE_SHORT = "close_short"
+    ASSERT_BALANCE = "assert_balance"
+    CASH_MOVEMENT = "cash_movement"

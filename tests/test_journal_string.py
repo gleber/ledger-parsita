@@ -83,7 +83,7 @@ def test_posting_to_journal_string_with_comment():
     assert posting.to_journal_string() == "expenses:broker:bitstamp  15.00 USD ; Broker fee"
 
 def test_posting_to_journal_string_with_status():
-    posting = Posting(account=AccountName(parts=["assets", "broker", "bitstamp"]), amount=Amount(quantity=Decimal("1349.20"), commodity=Commodity(name="USD")), status="*")
+    posting = Posting(account=AccountName(parts=["assets", "broker", "bitstamp"]), amount=Amount(quantity=Decimal("1349.20"), commodity=Commodity(name="USD")), status=Status.Cleared)
     assert posting.to_journal_string() == "* assets:broker:bitstamp  1349.20 USD"
 
 def test_posting_to_journal_string_with_tags():

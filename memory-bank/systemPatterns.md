@@ -23,20 +23,28 @@ This document describes the system architecture and key design patterns used in 
 
 - Parser Pattern: A dedicated component (`src/hledger_parser.py`) for parsing the hledger journal format into `Journal` objects.
 - Balance Sheet Builder Pattern: The `BalanceSheet` class in `src/balance.py` (with static methods `from_journal` and `from_transactions`, and instance method `apply_transaction`) processes a `Journal` chronologically.
-    - The `apply_transaction` method calls `_apply_direct_posting_effects` and `_process_asset_sale_capital_gains`.
+    - The `Posting` class now has a `get_effect()` method returning a `TransactionPositionEffect` enum (e.g., `OPEN_LONG`, `CLOSE_LONG`, `OPEN_SHORT`, `CLOSE_SHORT`) to classify postings.
+    - The `Lot` dataclass now includes an `is_short: bool` field.
+    - `Lot.try_create_from_posting` (static method) now uses `posting.get_effect()` to identify and create `Lot` objects for both long acquisitions and opening short positions (where `is_short=True`, quantity is negative, and `cost_basis_per_unit` stores the proceeds received).
+    - The `BalanceSheet.apply_transaction` method orchestrates processing:
+        - It determines the `TransactionPositionEffect` of each posting.
+        - For postings that are effectively closing a short position (an `OPEN_LONG` effect on an account with existing short lots), it calls `_process_short_closure_capital_gains`.
+        - For `CLOSE_LONG` effects, it calls `_process_long_sale_capital_gains` (renamed from `_process_asset_sale_capital_gains`).
+        - For genuine `OPEN_LONG` or `OPEN_SHORT` effects that are not closing existing positions, and for cash movements, it calls `_apply_direct_posting_effects`.
     - `_apply_direct_posting_effects`:
         - Updates own balances.
-        - Creates `Lot` objects for acquisitions by calling the static `Lot.try_create_from_posting` method. This method encapsulates the logic for identifying lot creation scenarios (balance assertions with cost, opening postings with cost) and calculating cost basis per unit.
-    - `_process_asset_sale_capital_gains`:
-        - Consolidates proceeds by calling the static helper `BalanceSheet._get_consolidated_proceeds`.
-            - This method now returns `Result[Amount, ConsolidatedProceedsError]`.
-            - `ConsolidatedProceedsError` has subtypes `NoCashProceedsFoundError` and `AmbiguousProceedsError` to represent specific failure modes.
-        - Performs FIFO matching and calculates gains/losses by calling the static helper `BalanceSheet._perform_fifo_matching_and_gains`. This helper updates `Lot.remaining_quantity` and returns `CapitalGainResult` objects.
+        - Creates `Lot` objects for new long or short positions via `Lot.try_create_from_posting`.
+    - `_process_long_sale_capital_gains` (formerly `_process_asset_sale_capital_gains`):
+        - Consolidates proceeds using `BalanceSheet._get_consolidated_proceeds`.
+        - Performs FIFO matching against long lots using `BalanceSheet._perform_fifo_matching_and_gains_for_long_closure` (renamed from `_perform_fifo_matching_and_gains`).
+    - New `_process_short_closure_capital_gains`:
+        - Consolidates cost to cover using the new static helper `BalanceSheet._get_consolidated_cost_to_cover`.
+        - Performs FIFO matching against short lots using the new static helper `BalanceSheet._perform_fifo_matching_and_gains_for_short_closure`.
     - Overall responsibilities include:
-        - Calculating running balances for all accounts by updating `Account.own_balances` and `Account.total_balances`.
-        - Identifying asset lots (`Lot` objects) with their cost basis upon acquisition (via `Lot.try_create_from_posting`) and adding them to `AssetBalance.lots`.
-        - Incrementally calculating capital gains/losses upon encountering closing postings (sales):
-            - Performing FIFO matching against available lots (delegated to `_perform_fifo_matching_and_gains`).
+        - Calculating running balances for all accounts.
+        - Identifying asset lots (`Lot` objects), including their `is_short` status, cost basis (for longs) or initial proceeds (for shorts), and adding them to `AssetBalance.lots`.
+        - Incrementally calculating capital gains/losses upon encountering closing postings (sales for longs, buy-to-covers for shorts).
+            - Performing FIFO matching against available lots (delegated to specific helpers for long/short).
         - Calculating cost basis, proceeds, and gain/loss for matched portions.
         - Updating the `remaining_quantity` of matched `Lot` objects.
         - Applying the calculated gain/loss by creating synthetic postings to the appropriate income/expense accounts, which in turn updates their balances.
@@ -52,8 +60,8 @@ This document describes the system architecture and key design patterns used in 
 - Caching Pattern: Utilized (`src/classes.py:SourceCacheManager`) for optimizing source position lookups during parsing.
 - Result Pattern: Used with `returns.result.Result` (`Success`, `Failure`) for functions that can fail in predictable ways, such as `BalanceSheet._get_consolidated_proceeds`. This enhances error handling by making failure cases explicit and type-safe.
 - Maybe Pattern: Used with `returns.maybe.Maybe` (`Some`, `Nothing`) for functions that can return an optional value (e.g., `Lot.try_create_from_posting`, `Account.get_account`, `BalanceSheet.get_account`). This makes handling of potentially absent values more explicit.
-- Transaction Validation Pattern: The `Transaction` class in `src/classes.py` now includes methods (`validate_internal_consistency`, `is_balanced`, `balance`) for checking its own integrity and balance based on its postings.
-    - The `balance` method, if successful in resolving elided amounts, now adds a comment "; auto-balanced" to the postings whose amounts were calculated. This comment is appended to any existing comment on the posting.
+- Transaction Validation Pattern: The `Transaction` class in `src/classes.py` now includes methods (`validate_internal_consistency`, `is_balanced`) for checking its own integrity and balance based on its postings.
+    - The `balance` method (which now calls the standalone `_transaction_balance` function from `src/transaction_balance.py`), if successful in resolving elided amounts, results in a transaction copy where a comment "; auto-balanced" is added to the postings whose amounts were calculated. This comment is appended to any existing comment on the posting.
     - This uses the `Result` pattern and custom error types (`TransactionIntegrityError`, `TransactionBalanceError` and their subtypes) for clear error reporting.
 
 ## Component Relationships
@@ -61,9 +69,13 @@ This document describes the system architecture and key design patterns used in 
 - The Parser reads the journal file(s) and produces a `Journal` object containing `Transaction` and other entries. Each `Transaction` object can now self-validate its internal consistency and whether its postings balance per commodity.
 - The `Journal` object is processed by `BalanceSheet.from_journal` (which internally uses `BalanceSheet.from_transactions` that iteratively calls `BalanceSheet.apply_transaction`).
 - The `BalanceSheet.apply_transaction` method:
-    - Calls `_apply_direct_posting_effects` which uses `Lot.try_create_from_posting` to identify and create `Lot` objects.
-    - Calls `_process_asset_sale_capital_gains` upon encountering closing postings. This method, in turn, uses `_get_consolidated_proceeds` (which returns a `Result`) and `_perform_fifo_matching_and_gains` to perform FIFO matching, calculate gains/losses, update lot quantities, and generate `CapitalGainResult` objects.
-- The final `BalanceSheet` produced contains all account balances and a list of detailed `CapitalGainResult` objects.
+    - Uses `posting.get_effect()` to determine the nature of the posting.
+    - If an `OPEN_LONG` effect occurs on an account with existing short lots, it's treated as a `CLOSE_SHORT` and routes to `_process_short_closure_capital_gains`.
+    - Otherwise, for `CLOSE_LONG`, it calls `_process_long_sale_capital_gains`.
+    - For genuine `OPEN_LONG` or `OPEN_SHORT` (not closing existing positions), it calls `_apply_direct_posting_effects` which uses `Lot.try_create_from_posting` to create the new lot.
+    - `_process_long_sale_capital_gains` uses `_get_consolidated_proceeds` and `_perform_fifo_matching_and_gains_for_long_closure`.
+    - `_process_short_closure_capital_gains` uses `_get_consolidated_cost_to_cover` and `_perform_fifo_matching_and_gains_for_short_closure`.
+- The final `BalanceSheet` produced contains all account balances and a list of detailed `CapitalGainResult` objects for both long and short position closures.
 - The CLI (`src/main.py`):
     - Uses a custom `click.ParamType` to parse filter strings.
     - Calls `Journal.parse_from_file` to get a `Journal` object (or a `Failure`).

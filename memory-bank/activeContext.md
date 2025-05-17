@@ -121,6 +121,20 @@ This document outlines the current focus and active considerations for ledger-pa
 - Added new test cases to `tests/test_classes.py` to verify the automatic comment addition for balanced postings.
 - Corrected `Commodity.isStock()` regex in `src/classes.py` to allow for periods in stock tickers (e.g., "MSFT.US") and adjusted max length.
 - Corrected assertions in `tests/test_classes.py` to use `isinstance(result, Success)` instead of `result.is_success` for checking `returns.result.Result` types. All tests in `tests/test_classes.py` now pass.
+- Refactored `src/transaction_balance.py` to have a standalone `_transaction_balance` function, removing the `TransactionBalancingMixin`.
+- Updated `src/classes.py` to remove the mixin from `Transaction` and call the new `_transaction_balance` function in its `balance` method.
+- Implemented handling for short positions:
+    - Added `TransactionPositionEffect` enum to `src/common_types.py`.
+    - Added `get_effect()` method to `Posting` class in `src/classes.py`, replacing `isOpening()` and `isClosing()`.
+    - Modified `Lot` dataclass in `src/balance.py` to include `is_short: bool`.
+    - Updated `Lot.try_create_from_posting` to handle `OPEN_SHORT` effect and correctly set `is_short`, quantity (negative), and use proceeds as `cost_basis_per_unit` for short lots.
+    - Renamed `_process_asset_sale_capital_gains` to `_process_long_sale_capital_gains` in `src/balance.py`.
+    - Renamed `_perform_fifo_matching_and_gains` to `_perform_fifo_matching_and_gains_for_long_closure` in `src/balance.py`.
+    - Added `_get_consolidated_cost_to_cover` helper to `BalanceSheet` for short sale closures.
+    - Added `_perform_fifo_matching_and_gains_for_short_closure` helper to `BalanceSheet`.
+    - Added `_process_short_closure_capital_gains` method to `BalanceSheet`.
+    - Refactored `BalanceSheet.apply_transaction` to correctly identify buy-to-cover scenarios (OPEN_LONG effect with existing short lots) and route to `_process_short_closure_capital_gains`.
+    - Added initial tests for opening and closing short positions in `tests/test_balance_short_positions.py`.
 
 ## Next Steps
 
@@ -151,6 +165,12 @@ Phase 2: Future Steps
 - Optional return values in `src/balance.py` are now represented using `Maybe[T]` from the `returns` library, improving explicitness in handling potentially absent values.
 - Transaction validation and balancing logic is being added to the `Transaction` class itself for checks that don't require external journal context.
 - Automatic commenting of calculated balances in `Transaction.balance()` provides better traceability for elided amounts.
+- Transaction balancing logic is now encapsulated in a standalone function `_transaction_balance` in `src/transaction_balance.py`, called by `Transaction.balance()`.
+- Short positions are identified by a `type:short` tag on the opening (sell) transaction posting.
+- The `cost_basis_per_unit` of a short `Lot` stores the proceeds received per unit when the short position was opened.
+- Gain/loss on short positions is calculated as: Initial Proceeds - Cost to Cover.
+- `Posting.get_effect()` is now the primary method for classifying a posting's impact.
+- `BalanceSheet.apply_transaction` uses `get_effect` and checks for existing short lots to differentiate between a genuine `OPEN_LONG` and a `CLOSE_SHORT` (buy-to-cover).
 
 ## Important Patterns and Preferences
 

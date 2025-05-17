@@ -9,9 +9,9 @@ from datetime import date
 from collections import defaultdict
 
 from src.classes import (
-    AccountName, Amount, Commodity, Posting, Transaction, Cost, CostKind, 
+    AccountName, Amount, Commodity, Posting, Transaction, Cost, CostKind,
     CommodityKind, CapitalGainResult, Comment, SourceLocation,
-    VerificationError, BalanceSheetCalculationError
+    VerificationError, BalanceSheetCalculationError, PositionEffect
 )
 from src.journal import Journal
 
@@ -23,19 +23,25 @@ class Lot:
     quantity: Amount
     cost_basis_per_unit: Amount
     original_posting: Posting
+    is_short: bool = False  # Added to distinguish short lots
     remaining_quantity: Decimal = field(init=False)
 
     def __post_init__(self):
         self.remaining_quantity = self.quantity.quantity
 
+    def __str__(self) -> str:
+        return f"lot: {self.acquisition_date} {self.quantity} {"short" if self.is_short else "long"}"
+
     @staticmethod
     def try_create_from_posting(posting: Posting, transaction: Transaction) -> Maybe['Lot']:
         """
         Attempts to create a Lot from a posting if it represents an asset acquisition
-        with sufficient cost information.
+        or opening a short position, with sufficient cost/proceeds information.
         Returns a Maybe[Lot] object.
         """
-        # Lot creation from balance assertion (e.g., "assets:gold = 10 GOLD @@ 20000 USD")
+        position_effect = posting.get_effect()
+
+        # Lot creation from balance assertion (always long)
         if posting.balance and posting.balance.quantity > 0 and posting.cost:
             cost_to_use: Maybe[Cost] = Maybe.from_optional(posting.cost)
             
@@ -47,22 +53,47 @@ class Lot:
             )
 
             return cost_basis_per_unit_maybe.map(
-                lambda cbpu: Lot(str(transaction.date), posting.balance, cbpu, posting) # type: ignore
+                lambda cbpu: Lot(
+                    acquisition_date=str(transaction.date), 
+                    quantity=posting.balance,  # type: ignore
+                    cost_basis_per_unit=cbpu, 
+                    original_posting=posting,
+                    is_short=False 
+                )
             )
 
-        # Lot creation from opening transaction posting (positive amount with cost, no balance assertion part)
-        elif posting.isOpening() and posting.amount:
-            opening_cost_to_use_maybe: Maybe[Cost] = Maybe.from_optional(transaction.get_posting_cost(posting))
+        # Lot creation from regular transaction posting (long or short)
+        elif posting.amount and (position_effect == PositionEffect.OPEN_LONG or position_effect == PositionEffect.OPEN_SHORT):
+            # For OPEN_LONG, cost is purchase cost.
+            # For OPEN_SHORT, 'cost' (from posting.cost or inferred) represents proceeds.
+            cost_or_proceeds_maybe: Maybe[Cost] = Maybe.from_optional(transaction.get_posting_cost(posting))
 
-            cost_basis_per_unit_maybe: Maybe[Amount] = opening_cost_to_use_maybe.bind(
+            value_per_unit_maybe: Maybe[Amount] = cost_or_proceeds_maybe.bind(
                 lambda c:
                     Some(Amount(abs(c.amount.quantity / posting.amount.quantity), c.amount.commodity)) # type: ignore
                     if c.kind == CostKind.TotalCost and posting.amount and posting.amount.quantity != 0 # type: ignore
                     else (Some(c.amount) if c.kind == CostKind.UnitCost else Nothing)
             )
             
-            return cost_basis_per_unit_maybe.map(
-                lambda cbpu: Lot(str(transaction.date), posting.amount, cbpu, posting) # type: ignore
+            is_short_lot = position_effect == PositionEffect.OPEN_SHORT
+            
+            # For short lots, the quantity stored in the Lot should be negative.
+            # The 'cost_basis_per_unit' for a short lot stores the proceeds per unit received.
+            lot_quantity = posting.amount
+            if is_short_lot and lot_quantity.quantity > 0: # Ensure short sale quantity is negative
+                lot_quantity = Amount(-lot_quantity.quantity, lot_quantity.commodity)
+            elif not is_short_lot and lot_quantity.quantity < 0: # Ensure long purchase quantity is positive
+                 lot_quantity = Amount(-lot_quantity.quantity, lot_quantity.commodity)
+
+
+            return value_per_unit_maybe.map(
+                lambda vpu: Lot(
+                    acquisition_date=str(transaction.date), 
+                    quantity=lot_quantity, # Use adjusted lot_quantity
+                    cost_basis_per_unit=vpu, # This is cost for long, proceeds for short
+                    original_posting=posting,
+                    is_short=is_short_lot
+                )
             )
         
         return Nothing
@@ -113,6 +144,9 @@ class AssetBalance(Balance):
             self.cost_basis_per_unit = Amount(Decimal(0), self.cost_basis_per_unit.commodity if self.cost_basis_per_unit.commodity.name != "" else Commodity(""))
 
         self.lots.append(lot)
+    
+    def __str__(self) -> str:
+        return f"asset balance: {self.commodity} {self.total_amount} {self.cost_basis_per_unit}"
 
 
 @dataclass
@@ -219,7 +253,7 @@ class Account:
 
     def get_all_subaccounts(self) -> List['Account']:
         """Recursively collects the current account and all its descendant accounts into a flat list."""
-        accounts = [self]
+        accounts: List['Account'] = [self]
         for child in self.children.values():
             accounts.extend(child.get_all_subaccounts())
         return accounts
@@ -362,12 +396,17 @@ class BalanceSheet:
         # Regular posting amount effects (cash movements, or asset sales that reduce quantity)
         # This condition ensures these are processed only if a lot wasn't created and handled above.
         if not lot_created_and_processed and posting.amount:
+            position_effect = posting.get_effect()
             if isinstance(balance_obj, CashBalance):
                 balance_obj.add_posting(posting) # Updates CashBalance.total_amount
-            elif isinstance(balance_obj, AssetBalance) and posting.isClosing(): # Sale of an asset
+            elif isinstance(balance_obj, AssetBalance) and position_effect == PositionEffect.CLOSE_LONG: # Sale of a long asset
                 # Reduce asset quantity. AssetBalance.total_amount is directly affected.
                 balance_obj.total_amount = Amount(balance_obj.total_amount.quantity + posting.amount.quantity, balance_obj.commodity)
-            
+            elif isinstance(balance_obj, AssetBalance) and position_effect == PositionEffect.CLOSE_SHORT: # Covering a short asset
+                balance_obj.total_amount = Amount(balance_obj.total_amount.quantity + posting.amount.quantity, balance_obj.commodity)
+            else:
+                print(f"Unknown posting effect {posting} for {balance_obj}")
+
             # Propagate all other posting amounts that were not part of lot creation via balance assertion or opening.
             account_node._propagate_total_balance_update(posting.amount)
 
@@ -437,16 +476,137 @@ class BalanceSheet:
         return Success(total_proceeds)
 
     @staticmethod
-    def _perform_fifo_matching_and_gains(
-        sorted_lots: List[Lot], 
-        sale_quantity: Decimal, 
-        sale_commodity: Commodity, 
-        total_proceeds: Amount, 
-        sale_posting: Posting, 
+    def _get_consolidated_cost_to_cover(transaction: Transaction, cover_posting: Posting) -> Result[Amount, ConsolidatedProceedsError]: # Renamed error for now, might need a new one
+        """
+        Identifies and consolidates cash cost from a transaction when buying to cover a short,
+        excluding the cover_posting itself.
+        Returns a Result containing the total cash cost as an Amount, or an error.
+        """
+        if cover_posting.amount is None:
+            return Failure(BalanceSheet.ConsolidatedProceedsError("Cover posting has no amount.")) # type: ignore
+
+        cash_cost_postings: List[Posting] = []
+        for p in transaction.postings:
+            # Cost to cover is a negative cash flow (money spent)
+            if p != cover_posting and p.amount and p.amount.quantity < 0 and \
+               p.amount.commodity != cover_posting.amount.commodity and p.amount.commodity.isCash() and \
+               (not p.account.name.startswith("expenses:")) and \
+               (not p.account.name.startswith("income:")):
+                cash_cost_postings.append(p)
+
+        if not cash_cost_postings:
+            return Failure(BalanceSheet.NoCashProceedsFoundError("No cash cost found for covering the short sale.")) # Re-using error, might need specific one
+
+        total_cost: Optional[Amount] = None
+        for p_cash in cash_cost_postings:
+            if p_cash.amount is None: continue
+            # Since cost postings are negative, we sum them up. The result will be negative.
+            if total_cost is None:
+                total_cost = p_cash.amount
+            elif total_cost.commodity == p_cash.amount.commodity:
+                total_cost = Amount(total_cost.quantity + p_cash.amount.quantity, total_cost.commodity)
+            else:
+                cash_details_str = BalanceSheet._format_transaction_cash_postings_for_error(transaction, cover_posting)
+                return Failure(BalanceSheet.AmbiguousProceedsError( # Re-using error
+                    f"Multiple different cash commodities found in cost to cover for transaction {transaction.date} - {transaction.payee}.\n"
+                    f"Cash Postings Found:\n{cash_details_str}"
+                ))
+        
+        if total_cost is None:
+            return Failure(BalanceSheet.ConsolidatedProceedsError( # Re-using error
+                f"Logical error: Cash cost postings were identified but could not be consolidated for transaction {transaction.date} - {transaction.payee}."
+            ))
+        # total_cost will be negative. For calculations, we often need the absolute value.
+        # However, returning the actual (negative) amount might be more consistent.
+        # Let's return the absolute amount for "cost" to be positive.
+        return Success(Amount(abs(total_cost.quantity), total_cost.commodity))
+
+
+    @staticmethod
+    def _perform_fifo_matching_and_gains_for_short_closure(
+        sorted_short_lots: List[Lot],
+        cover_quantity: Decimal, # Quantity being bought to cover
+        cover_commodity: Commodity,
+        total_cost_to_cover: Amount, # Total cost for the cover_quantity
+        cover_posting: Posting,
         transaction_date: date
     ) -> tuple[List[CapitalGainResult], Decimal]:
         """
-        Performs FIFO matching of a sale against sorted lots, calculates capital gains,
+        Performs FIFO matching of a short cover against sorted short lots, calculates capital gains,
+        and updates lot remaining quantities.
+        Returns a list of CapitalGainResult objects and the remaining quantity of the cover to be matched.
+        """
+        capital_gains_results: List[CapitalGainResult] = []
+        quantity_to_match = cover_quantity # Positive quantity being bought back
+
+        for current_lot in sorted_short_lots:
+            if quantity_to_match <= 0:
+                break
+            
+            # current_lot.remaining_quantity is negative for short lots
+            if current_lot.is_short and current_lot.remaining_quantity < 0:
+                # match_quantity_decimal is the amount of the short position being covered by this lot
+                # It's positive, representing the number of shares/units.
+                match_quantity_decimal = min(quantity_to_match, abs(current_lot.remaining_quantity))
+                match_quantity_amount = Amount(match_quantity_decimal, cover_commodity)
+
+                # Initial proceeds per unit when short was opened is in current_lot.cost_basis_per_unit
+                initial_proceeds_per_unit = current_lot.cost_basis_per_unit
+                total_initial_proceeds_for_matched_qty_decimal = match_quantity_decimal * initial_proceeds_per_unit.quantity
+                total_initial_proceeds_for_matched_qty_amount = Amount(total_initial_proceeds_for_matched_qty_decimal, initial_proceeds_per_unit.commodity)
+
+                # Cost to cover this part of the short position
+                cost_to_cover_this_portion_decimal = Decimal(0)
+                if cover_quantity != 0: # Avoid division by zero
+                    cost_to_cover_this_portion_decimal = (match_quantity_decimal / cover_quantity) * total_cost_to_cover.quantity
+                cost_to_cover_this_portion_amount = Amount(cost_to_cover_this_portion_decimal, total_cost_to_cover.commodity)
+
+                gain_loss_amount: Amount
+                if total_initial_proceeds_for_matched_qty_amount.commodity != cost_to_cover_this_portion_amount.commodity:
+                    lot_detail_str = f"    - Short Open Date: {current_lot.acquisition_date}, Orig. Qty: {current_lot.quantity}, Rem. Qty: {current_lot.remaining_quantity}, Proceeds/Unit: {current_lot.cost_basis_per_unit}"
+                    raise ValueError(
+                        f"Initial proceeds commodity ({total_initial_proceeds_for_matched_qty_amount.commodity.name}) and cost to cover commodity ({cost_to_cover_this_portion_amount.commodity.name}) differ. Cannot accurately calculate gain/loss for short closure.\n"
+                        f"Cover Posting: {cover_posting.account.name} {cover_posting.amount}\n"
+                        f"Matched Short Lot Details:\n{lot_detail_str}"
+                    )
+                else:
+                    # Gain/Loss for short = Initial Proceeds - Cost to Cover
+                    gain_loss_decimal = total_initial_proceeds_for_matched_qty_decimal - cost_to_cover_this_portion_decimal
+                    gain_loss_amount = Amount(gain_loss_decimal, total_initial_proceeds_for_matched_qty_amount.commodity)
+                
+                try:
+                    short_open_date_obj = datetime.datetime.strptime(current_lot.acquisition_date, '%Y-%m-%d').date()
+                except ValueError as e:
+                    raise ValueError(f"Could not parse short open date '{current_lot.acquisition_date}' for lot being processed: {e}")
+
+                capital_gains_results.append(CapitalGainResult(
+                    closing_posting=cover_posting, # The posting that covers the short
+                    opening_lot_original_posting=current_lot.original_posting, # The posting that opened the short
+                    matched_quantity=match_quantity_amount, # Positive quantity covered
+                    cost_basis=cost_to_cover_this_portion_amount, # Cost to cover this part
+                    proceeds=total_initial_proceeds_for_matched_qty_amount, # Initial proceeds for this part
+                    gain_loss=gain_loss_amount,
+                    closing_date=transaction_date, # Date of covering
+                    acquisition_date=short_open_date_obj # Date short was opened
+                ))
+
+                current_lot.remaining_quantity += match_quantity_decimal # Make it less negative
+                quantity_to_match -= match_quantity_decimal
+        
+        return capital_gains_results, quantity_to_match
+
+
+    @staticmethod
+    def _perform_fifo_matching_and_gains_for_long_closure(
+        sorted_lots: List[Lot],
+        sale_quantity: Decimal,
+        sale_commodity: Commodity,
+        total_proceeds: Amount,
+        sale_posting: Posting,
+        transaction_date: date
+    ) -> tuple[List[CapitalGainResult], Decimal]:
+        """
+        Performs FIFO matching of a long sale against sorted long lots, calculates capital gains,
         and updates lot remaining quantities.
         Returns a list of CapitalGainResult objects and the remaining quantity of the sale to be matched.
         """
@@ -505,8 +665,8 @@ class BalanceSheet:
         
         return capital_gains_results, quantity_to_match
 
-    def _process_asset_sale_capital_gains(self, sale_posting: Posting, transaction: Transaction):
-        """Processes an asset sale for capital gains calculation and application."""
+    def _process_long_sale_capital_gains(self, sale_posting: Posting, transaction: Transaction):
+        """Processes a long asset sale for capital gains calculation and application."""
         if sale_posting.amount is None:
             return
 
@@ -554,10 +714,10 @@ class BalanceSheet:
                 f"Problematic acquisition dates might be among: {', '.join(lot_acq_dates)}"
             )
 
-        # Call the new helper for FIFO matching and gain calculation
-        realized_gains_for_this_sale, remaining_to_match = BalanceSheet._perform_fifo_matching_and_gains(
-            sorted_lots=sorted_lots,
-            sale_quantity=closing_quantity, # Pass the original total sale quantity
+        # Call the helper for FIFO matching and gain calculation for long positions
+        realized_gains_for_this_sale, remaining_to_match = BalanceSheet._perform_fifo_matching_and_gains_for_long_closure(
+            sorted_lots=[lot for lot in sorted_lots if not lot.is_short], # Ensure we only match against long lots
+            sale_quantity=closing_quantity,
             sale_commodity=closing_commodity,
             total_proceeds=total_proceeds,
             sale_posting=sale_posting,
@@ -577,22 +737,130 @@ class BalanceSheet:
             )
             raise ValueError(error_message)
 
+    def _process_short_closure_capital_gains(self, cover_posting: Posting, transaction: Transaction):
+        """Processes an asset purchase to cover a short position for capital gains."""
+        if cover_posting.amount is None:
+            return
 
-    def apply_transaction(self, transaction: Transaction) -> 'BalanceSheet':
+        covering_account_name = cover_posting.account
+        covering_commodity = cover_posting.amount.commodity
+        # cover_quantity is positive as it's a buy
+        cover_quantity = abs(cover_posting.amount.quantity) 
+
+        if not (covering_commodity and cover_quantity > 0):
+            return
+
+        cost_to_cover_result = BalanceSheet._get_consolidated_cost_to_cover(transaction, cover_posting)
+
+        if isinstance(cost_to_cover_result, Failure):
+            failure_value = cost_to_cover_result.failure()
+            # Using existing error types, might need more specific ones for cost_to_cover
+            if isinstance(failure_value, BalanceSheet.NoCashProceedsFoundError): # Effectively "NoCashCostFoundError"
+                return 
+            elif isinstance(failure_value, BalanceSheet.AmbiguousProceedsError): # Effectively "AmbiguousCostError"
+                raise ValueError(str(failure_value))
+            else:
+                raise ValueError(f"Error consolidating cost to cover: {str(failure_value)}")
+        
+        total_cost_to_cover: Amount = cost_to_cover_result.unwrap()
+
+        covering_account_node = self.get_or_create_account(covering_account_name)
+        # Collect only short lots for the specific commodity
+        all_relevant_short_lots = [
+            lot for lot in covering_account_node._collect_lots_recursive(covering_commodity) if lot.is_short
+        ]
+
+        if not all_relevant_short_lots:
+            account_balance_info = covering_account_node._format_balances_for_error(covering_commodity)
+            error_message = (
+                f"No open short lots found for {covering_account_name.name}:{covering_commodity.name} to match cover purchase in transaction {transaction.date} - {transaction.payee}.\n"
+                f"Account {covering_account_name.name} balance for {covering_commodity.name}:\n{account_balance_info}"
+            )
+            raise ValueError(error_message)
+
+        try:
+            # Sort by acquisition_date (date short was opened)
+            sorted_short_lots = sorted(all_relevant_short_lots, key=lambda lot: datetime.datetime.strptime(lot.acquisition_date, '%Y-%m-%d').date())
+        except ValueError as e:
+            lot_acq_dates = [f"'{l.acquisition_date}'" for l in all_relevant_short_lots]
+            raise ValueError(
+                f"Error parsing acquisition date for sorting short lots for {covering_account_name.name}:{covering_commodity.name}: {e}.\n"
+                f"Problematic acquisition dates might be among: {', '.join(lot_acq_dates)}"
+            )
+
+        realized_gains_for_this_cover, remaining_to_match = BalanceSheet._perform_fifo_matching_and_gains_for_short_closure(
+            sorted_short_lots=sorted_short_lots,
+            cover_quantity=cover_quantity,
+            cover_commodity=covering_commodity,
+            total_cost_to_cover=total_cost_to_cover,
+            cover_posting=cover_posting,
+            transaction_date=transaction.date
+        )
+        self.capital_gains_realized.extend(realized_gains_for_this_cover)
+
+        if remaining_to_match > 0:
+            lot_details_str = self._format_lot_details_for_error(all_relevant_short_lots)
+            account_details_str = covering_account_node._format_balances_for_error(covering_commodity)
+            error_message = (
+                f"Not enough open short lots found for {cover_quantity} {covering_commodity.name} "
+                f"in {covering_account_name.name} to match cover purchase in transaction "
+                f"{transaction.date} - {transaction.payee}. Remaining to match: {remaining_to_match}.\n"
+                f"Account Details ({covering_account_name.name} for {covering_commodity.name}):\n{account_details_str}\n"
+                f"Available Short Lots Considered:\n{lot_details_str}"
+            )
+            raise ValueError(error_message)
+
+
+    def apply_transaction(self, transaction: Transaction) -> Result['BalanceSheet', BalanceSheetCalculationError]:
         """
         Applies a single transaction to the balance sheet, updating balances, lots, and calculating capital gains.
-        This method modifies the BalanceSheet instance it's called on and returns it.
+        This method modifies the BalanceSheet instance it's called on and returns a Result.
         """
         try:
             for posting in transaction.postings:
-                self._apply_direct_posting_effects(posting, transaction)
-                if posting.amount is not None:
-                    account_node = self.get_or_create_account(posting.account)
-                    if posting.amount.commodity not in account_node.own_balances:
-                        pass
-                    balance_obj = account_node.get_own_balance(posting.amount.commodity)
-                    if posting.isClosing() and isinstance(balance_obj, AssetBalance):
-                        self._process_asset_sale_capital_gains(posting, transaction)
+                if posting.amount is None and posting.balance is None: # Skip postings without financial effect
+                    continue
+
+                account_node = self.get_or_create_account(posting.account)
+                commodity_for_balance = posting.amount.commodity if posting.amount else posting.balance.commodity  # type: ignore
+                balance_obj = account_node.get_own_balance(commodity_for_balance)
+                position_effect = posting.get_effect()
+
+                is_closing_a_short_position = False
+                if position_effect == PositionEffect.OPEN_LONG and isinstance(balance_obj, AssetBalance):
+                    if any(lot.is_short and lot.remaining_quantity < 0 for lot in balance_obj.lots):
+                        is_closing_a_short_position = True
+                
+                # --- Handle Capital Gains and Lot Creation/Consumption ---
+                if is_closing_a_short_position: # Identified OPEN_LONG that is actually closing a short
+                    self._process_short_closure_capital_gains(posting, transaction)
+                    # Apply the quantity change of the buy-to-cover to the asset balance
+                    if posting.amount and isinstance(balance_obj, AssetBalance):
+                        balance_obj.total_amount = Amount(balance_obj.total_amount.quantity + posting.amount.quantity, balance_obj.commodity)
+                        account_node._propagate_total_balance_update(posting.amount) # Propagate this specific posting
+                
+                elif position_effect == PositionEffect.CLOSE_LONG and isinstance(balance_obj, AssetBalance):
+                    self._process_long_sale_capital_gains(posting, transaction)
+                    # Apply the quantity change of the sale to the asset balance
+                    if posting.amount: # Should always have amount for CLOSE_LONG
+                        balance_obj.total_amount = Amount(balance_obj.total_amount.quantity + posting.amount.quantity, balance_obj.commodity)
+                        account_node._propagate_total_balance_update(posting.amount)
+
+                elif position_effect == PositionEffect.OPEN_SHORT:
+                    # Let _apply_direct_posting_effects create the short lot and update balances
+                    self._apply_direct_posting_effects(posting, transaction)
+                
+                elif position_effect == PositionEffect.OPEN_LONG and not is_closing_a_short_position:
+                    # Genuine OPEN_LONG, let _apply_direct_posting_effects create the long lot
+                    self._apply_direct_posting_effects(posting, transaction)
+                
+                elif position_effect == PositionEffect.CASH_MOVEMENT or not isinstance(balance_obj, AssetBalance):
+                    self._apply_direct_posting_effects(posting, transaction)
+                elif position_effect == PositionEffect.ASSERT_BALANCE:
+                    self._apply_direct_posting_effects(posting, transaction)
+                else:
+                    print(f"Unknown position effect: {position_effect}. Skipping posting: {posting.to_journal_string()}")
+
             return Success(self)
         except ValueError as e:
             # Try to get source location from the transaction
@@ -613,11 +881,16 @@ class BalanceSheet:
         balance_sheet = BalanceSheet()
         errors: List[BalanceSheetCalculationError] = []
 
+        print(f"Applying {len(sorted_transactions)} transactions to balance sheet...")
+
         for transaction in sorted_transactions:
+            print(f"Processing transaction: {transaction.to_journal_string()}")
             apply_result = balance_sheet.apply_transaction(transaction)
             if isinstance(apply_result, Failure):
                 # apply_transaction now returns Failure(BalanceSheetCalculationError)
                 errors.append(apply_result.failure())
+            else:
+                print(f"Resulting balance: {"\n".join(apply_result.unwrap().format_account_flat())}")
         
         if errors:
             return Failure(errors)

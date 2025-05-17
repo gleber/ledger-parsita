@@ -74,6 +74,22 @@ This document tracks the progress, completed features, and remaining tasks for l
 - `Transaction.balance()` in `src/classes.py` now appends "; auto-balanced" to comments of postings with calculated (elided) amounts.
 - Added tests to `tests/test_classes.py` for the auto-commenting feature.
 - Corrected `Commodity.isStock()` regex and test assertions in `tests/test_classes.py` related to `returns.result.Result` checking. All tests in `tests/test_classes.py` pass.
+- Refactored transaction balancing logic:
+    - Moved balancing logic from `TransactionBalancingMixin` to a standalone function `_transaction_balance` in `src/transaction_balance.py`.
+    - Removed `TransactionBalancingMixin` from `Transaction` class in `src/classes.py`.
+    - Updated `Transaction.balance` method in `src/classes.py` to call `_transaction_balance`.
+- Implemented handling for short positions:
+    - Added `TransactionPositionEffect` enum to `src/common_types.py`.
+    - Added `get_effect()` method to `Posting` class in `src/classes.py`, replacing `isOpening()` and `isClosing()`.
+    - Modified `Lot` dataclass in `src/balance.py` to include `is_short: bool`.
+    - Updated `Lot.try_create_from_posting` to handle `OPEN_SHORT` effect and correctly set `is_short`, quantity (negative), and use proceeds as `cost_basis_per_unit` for short lots.
+    - Renamed `_process_asset_sale_capital_gains` to `_process_long_sale_capital_gains` in `src/balance.py`.
+    - Renamed `_perform_fifo_matching_and_gains` to `_perform_fifo_matching_and_gains_for_long_closure` in `src/balance.py`.
+    - Added `_get_consolidated_cost_to_cover` helper to `BalanceSheet` for short sale closures.
+    - Added `_perform_fifo_matching_and_gains_for_short_closure` helper to `BalanceSheet`.
+    - Added `_process_short_closure_capital_gains` method to `BalanceSheet`.
+    - Refactored `BalanceSheet.apply_transaction` to correctly identify buy-to-cover scenarios (OPEN_LONG effect with existing short lots) and route to `_process_short_closure_capital_gains`.
+    - Added initial tests for opening and closing short positions in `tests/test_balance_short_positions.py` which are passing.
 
 ## What's Left to Build
 
@@ -99,7 +115,8 @@ This document tracks the progress, completed features, and remaining tasks for l
 - All previously failing tests related to capital gains logic have been fixed.
 - Error handling for proceeds consolidation in `src/balance.py` has been refactored using the `Result` pattern.
 - Automatic commenting of calculated balances in `Transaction.balance()` is implemented and tested.
-- Ready to begin Phase 2 (Generating journal entries, updating files).
+- Core logic for handling short position capital gains (opening, closing, FIFO matching) is implemented and initial tests pass.
+- Ready to begin Phase 2 (Generating journal entries, updating files) or add more comprehensive tests for short positions.
 
 ## Known Issues
 
@@ -122,4 +139,6 @@ This document tracks the progress, completed features, and remaining tasks for l
 - Error handling for proceeds consolidation in `src/balance.py` now uses the `Result` pattern with custom error types, making it more robust and explicit.
 - Optional return values in `src/balance.py` are now represented using `Maybe[T]` from the `returns` library, improving explicitness in handling potentially absent values.
 - Added methods to `Transaction` class for self-validation of internal consistency and balancing.
-- `Transaction.balance()` now adds comments to auto-calculated postings.
+- `Transaction.balance()` (via `_transaction_balance`) now adds comments to auto-calculated postings.
+- Short position handling relies on `type:short` tag for opening short sales.
+- `Posting.get_effect()` identifies buy-to-cover based on an `OPEN_LONG` effect on an account with existing short lots; this is handled in `BalanceSheet.apply_transaction`.

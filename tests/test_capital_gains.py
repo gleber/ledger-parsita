@@ -2,6 +2,7 @@ import pytest
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from textwrap import dedent
 from returns.maybe import Some, Nothing
 from returns.result import Success, Failure # Import Success and Failure
 
@@ -76,71 +77,114 @@ def test_capital_gains_opening_balance_then_partial_sell():
     Tests capital gains calculation when assets are introduced via a balance assertion
     and then a portion is sold.
     """
-    journal_string = """
-2023-01-01 * Opening Balance SOL
-    assets:broker:tastytrade:SOL:20230101  = 10 SOL @@ 20 USD
+    # sol_commodity = Commodity("SOL") # This line was causing indentation error if uncommented incorrectly
+    # Commodity.kind is a property, so we can't directly set it.
+    # We rely on CRYPTO_TICKERS in base_classes.py to correctly identify SOL.
+    # The issue is likely elsewhere if SOL is not treated as an AssetBalance.
 
-2023-02-01 * Sell Partial SOL
-    assets:broker:tastytrade     210.60 USD  ; Proceeds from 2 SOL @ 105.30 USD
-    assets:broker:tastytrade:SOL:20230101    -2 SOL @@ 105.30 USD
-    expenses:trading_fees        1.00 USD
-"""
-    # Using a dummy path as it's not strictly needed for content parsing here
-    # The .unwrap() call will raise an error if parsing fails.
-    journal = Journal.parse_from_content(journal_string, Path("test_opening_balance_sell.journal")).unwrap()
-    result_balance_sheet = BalanceSheet.from_journal(journal)
-    assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_journal failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
-    balance_sheet = result_balance_sheet.unwrap()
+    journal_string_balance_assertion = dedent("""\
+        2023-01-01 * Opening Balance SOL
+            assets:broker:tastytrade:SOL:20230101  = 10 SOL @@ 20 USD
+        """)
+        # Using a dummy path as it's not strictly needed for content parsing here
+    journal_balance_assertion = Journal.parse_from_content(journal_string_balance_assertion, Path("test_balance_assertion.journal")).unwrap() # REMOVED .strip_loc()
 
-    assert len(balance_sheet.capital_gains_realized) == 1
-    gain_result = balance_sheet.capital_gains_realized[0]
+    # Verify the posting object from the balance assertion
+    assert len(journal_balance_assertion.entries) == 1
+    balance_assertion_transaction = journal_balance_assertion.entries[0].transaction
+    assert balance_assertion_transaction is not None
+    assert len(balance_assertion_transaction.postings) == 1
+    balance_posting = balance_assertion_transaction.postings[0]
+    
+    assert balance_posting.balance is not None, "Balance assertion posting has no .balance"
+    assert balance_posting.balance.quantity == Decimal("10"), "Balance quantity is not 10"
+    assert balance_posting.balance.commodity.name == "SOL", "Balance commodity is not SOL"
+    assert balance_posting.cost is not None, "Balance assertion posting has no .cost"
+    assert balance_posting.cost.kind == CostKind.TotalCost, "Balance assertion cost kind is not TotalCost"
+    assert balance_posting.cost.amount.quantity == Decimal("20"), "Cost amount quantity is not 20"
+    assert balance_posting.cost.amount.commodity.name == "USD", "Cost amount commodity is not USD"
+
+    result_balance_sheet_assertion = BalanceSheet.from_journal(journal_balance_assertion)
+    assert isinstance(result_balance_sheet_assertion, Success), f"BalanceSheet.from_journal for assertion failed: {result_balance_sheet_assertion.failure() if isinstance(result_balance_sheet_assertion, Failure) else 'Unknown error'}"
+    balance_sheet_assertion = result_balance_sheet_assertion.unwrap()
+
+    # Check if lot was created
+    target_account_name = AccountName(parts=["assets", "broker", "tastytrade", "SOL", "20230101"])
+    target_commodity = Commodity("SOL")
+    
+    account_node_maybe = balance_sheet_assertion.get_account(target_account_name)
+    assert isinstance(account_node_maybe, Some), "Target account node not found after balance assertion"
+    account_node = account_node_maybe.unwrap()
+    
+    balance_obj = account_node.get_own_balance(target_commodity)
+    assert isinstance(balance_obj, AssetBalance), "Balance object is not AssetBalance for SOL"
+    assert len(balance_obj.lots) == 1, "Lot not created from balance assertion"
+    created_lot = balance_obj.lots[0]
+    assert created_lot.quantity.quantity == Decimal("10")
+    assert created_lot.cost_basis_per_unit.quantity == Decimal("2")
+    assert created_lot.cost_basis_per_unit.commodity.name == "USD"
+    assert not created_lot.is_short
+
+    # Now test the full scenario
+    journal_string_full = dedent("""\
+        2023-01-01 * Opening Balance SOL
+            assets:broker:tastytrade:SOL:20230101  = 10 SOL @@ 20 USD
+
+        2023-02-01 * Sell Partial SOL
+            assets:broker:tastytrade     210.60 USD  ; Proceeds from 2 SOL @ 105.30 USD
+            assets:broker:tastytrade:SOL:20230101    -2 SOL @@ 105.30 USD
+            expenses:trading_fees        1.00 USD
+        """)
+    journal_full = Journal.parse_from_content(journal_string_full, Path("test_opening_balance_sell.journal")).unwrap()
+    result_balance_sheet_full = BalanceSheet.from_journal(journal_full)
+    assert isinstance(result_balance_sheet_full, Success), f"BalanceSheet.from_journal for full scenario failed: {result_balance_sheet_full.failure() if isinstance(result_balance_sheet_full, Failure) else 'Unknown error'}"
+    balance_sheet_full = result_balance_sheet_full.unwrap()
+
+    assert len(balance_sheet_full.capital_gains_realized) == 1
+    gain_result = balance_sheet_full.capital_gains_realized[0]
 
     assert gain_result.closing_posting.account.parts == ["assets", "broker", "tastytrade", "SOL", "20230101"]
     assert gain_result.matched_quantity.quantity == Decimal("2")
     assert gain_result.matched_quantity.commodity.name == "SOL"
     
-    # Cost basis: 10 SOL @@ 20 USD means 1 SOL costs 2 USD. For 2 SOL, cost is 2 * 2 = 4 USD.
     assert gain_result.cost_basis.quantity == Decimal("4.00") 
     assert gain_result.cost_basis.commodity.name == "USD"
 
-    # Proceeds: 2 SOL * 105.30 USD/SOL = 210.60 USD
     assert gain_result.proceeds.quantity == Decimal("210.60")
     assert gain_result.proceeds.commodity.name == "USD"
 
-    # Gain/Loss: 210.60 USD (proceeds) - 4.00 USD (cost basis) = 206.60 USD
     assert gain_result.gain_loss.quantity == Decimal("206.60")
     assert gain_result.gain_loss.commodity.name == "USD"
     
     assert gain_result.closing_date == date(2023, 2, 1)
-    assert gain_result.acquisition_date == date(2023, 1, 1) # From dated subaccount (year directive + date in account)
+    assert gain_result.acquisition_date == date(2023, 1, 1)
 
-    # Verify the remaining asset account balance
-    asset_account_maybe = balance_sheet.get_account(AccountName(parts=["assets", "broker", "tastytrade", "SOL", "20230101"])) # This is correct
-    assert isinstance(asset_account_maybe, Some), "Asset account SOL:20230101 not found"
-    asset_account = asset_account_maybe.unwrap()
-    asset_balance = asset_account.get_own_balance(Commodity("SOL"))
-    assert isinstance(asset_balance, AssetBalance) 
-    assert asset_balance.total_amount.quantity == Decimal("8") # 10 initial - 2 sold = 8 remaining
-    # Check remaining lots
-    assert len(asset_balance.lots) == 1
-    assert asset_balance.lots[0].remaining_quantity == Decimal("8") # Check remaining_quantity
-    assert asset_balance.lots[0].cost_basis_per_unit.quantity == Decimal("2") # Cost per unit was 2 USD/SOL
-    assert asset_balance.lots[0].cost_basis_per_unit.commodity.name == "USD"
+    asset_account_maybe_full = balance_sheet_full.get_account(target_account_name)
+    assert isinstance(asset_account_maybe_full, Some), "Asset account SOL:20230101 not found in full scenario"
+    asset_account_full = asset_account_maybe_full.unwrap()
+    asset_balance_full = asset_account_full.get_own_balance(target_commodity)
+    assert isinstance(asset_balance_full, AssetBalance) 
+    assert asset_balance_full.total_amount.quantity == Decimal("8")
+    assert len(asset_balance_full.lots) == 1
+    assert asset_balance_full.lots[0].remaining_quantity == Decimal("8")
+    assert asset_balance_full.lots[0].cost_basis_per_unit.quantity == Decimal("2")
+    assert asset_balance_full.lots[0].cost_basis_per_unit.commodity.name == "USD"
 
-
-def test_capital_gains_opening_balance_then_partial_sell_all():
+def test_capital_gains_opening_balance_then_sell_all():
     """
     Tests capital gains calculation when assets are introduced via a balance assertion
     and then a portion is sold.
     """
-    journal_string = """
-2023-01-01 * Opening Balance SOL
-    assets:broker:tastytrade:SOL:20230101  = 10 SOL @@ 20 USD
+    # sol_commodity = Commodity("SOL") # Rely on CRYPTO_TICKERS
 
-2023-02-01 * Sell Partial SOL
-    assets:broker:tastytrade     1000 USD
-    assets:broker:tastytrade:SOL:20230101    -10 SOL
-"""
+    journal_string = dedent("""\
+        2023-01-01 * Opening Balance SOL
+            assets:broker:tastytrade:SOL:20230101  = 10 SOL @@ 20 USD
+
+        2023-02-01 * Sell Partial SOL
+            assets:broker:tastytrade     1000 USD
+            assets:broker:tastytrade:SOL:20230101    -10 SOL
+        """)
     journal = Journal.parse_from_content(journal_string, Path("test_opening_balance_sell.journal")).unwrap().strip_loc()
     result_balance_sheet = BalanceSheet.from_journal(journal)
     assert isinstance(result_balance_sheet, Success), f"BalanceSheet.from_journal failed: {result_balance_sheet.failure() if isinstance(result_balance_sheet, Failure) else 'Unknown error'}"
