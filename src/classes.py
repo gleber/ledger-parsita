@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field, fields, replace
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Self, Union, Dict, Generic, TypeVar
+from typing import List, Optional, Self, Union, Dict, Generic, TypeVar, TYPE_CHECKING
 import datetime
 from decimal import Decimal
 import re
@@ -477,6 +477,8 @@ class Include(PositionAware["Include"]):
     def to_journal_string(self) -> str:
         return f"include {self.filename}"
 
+if TYPE_CHECKING:
+    from .journal import Journal # Forward reference for Journal
 
 @dataclass
 class AccountDirective(PositionAware["AccountDirective"]):

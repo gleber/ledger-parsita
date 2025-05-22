@@ -7,6 +7,7 @@ This document outlines the current focus and active considerations for ledger-pa
 - Completed Phase 1: Integrated Capital Gains Calculation into Balance Sheet Builder.
 - Completed adding date filters (`before:`, `after:`, `period:`) with partial date support.
 - Refactored error handling in `_get_consolidated_proceeds` and `_process_asset_sale_capital_gains` in `src/balance.py` to use `Result` pattern and custom error types (`NoCashProceedsFoundError`, `AmbiguousProceedsError`).
+- **Adapting user-provided code for `transaction_to_flows` into `src/transaction_flows.py`.**
 - Starting Phase 2: Improvements.
 - Preparing for Phase 3: Future Steps.
 
@@ -135,21 +136,52 @@ This document outlines the current focus and active considerations for ledger-pa
     - Added `_process_short_closure_capital_gains` method to `BalanceSheet`.
     - Refactored `BalanceSheet.apply_transaction` to correctly identify buy-to-cover scenarios (OPEN_LONG effect with existing short lots) and route to `_process_short_closure_capital_gains`.
     - Added initial tests for opening and closing short positions in `tests/test_balance_short_positions.py`.
+- Implemented `transaction_to_flows` function in `src/transaction_flows.py`:
+    - Adapts provided flow generation logic to `ledger-parsita` data structures.
+    - Uses a `PostingStatus` wrapper to manage mutable state during flow calculation.
+    - Derives sale proceeds and P&L by inspecting the full transaction.
+    - Returns `Result[List[Flow], UnhandledRemainderError]` to indicate success or unhandled posting remainders.
+    - Added `UnhandledRemainderError` and `UnhandledPostingDetail` custom error classes.
+- Created `tests/test_transaction_flows.py` with tests converted from the original script's examples, all passing.
+    - **Added `check_flows_balance` function to `src/transaction_flows.py`**:
+        - This function verifies that a `List[Flow]` is balanced for commodities found in any `flow.cost_basis`.
+        - It returns `Result[None, UnbalancedFlowsError]`.
+        - Defined `FlowImbalanceDetail` and `UnbalancedFlowsError` custom dataclasses for detailed error reporting.
+- **Integrated `check_flows_balance` into `tests/test_transaction_flows.py`**:
+    - All tests now assert that generated flows are balanced (for cost basis commodities) using this new function.
+    - Resolved a persistent Pylance typing error by further refining type guards for dictionary key usage in `check_flows_balance`.
+- **Adapted user-provided code into `src/transaction_flows.py`**:
+    - Replaced the previous `transaction_to_flows` implementation with the user's logic.
+    - Corrected attribute access for `Amount` (using `.quantity`), `Commodity` (using `.name`).
+    - Updated price/cost extraction to correctly use `Posting.cost` (which is `src.classes.Cost`) and `CostKind` (from `src.common_types`).
+    - Ensured `PostingStatus.remaining_quantity` is handled as an `Amount`.
+    - Retained existing `Flow`, `UnhandledPostingDetail`, and `UnhandledRemainderError` dataclasses.
 
 ## Next Steps
 
-Phase 1: Improvements
+**Phase 2: Flow-Based Balance Sheet Updates**
+- **Refactor `BalanceSheet.apply_transaction`**:
+    - Modify `BalanceSheet.apply_transaction` (in `src/balance.py`) to first call `transaction_to_flows(transaction)`.
+    - If `transaction_to_flows` returns a `Failure(UnhandledRemainderError)`, this error should be propagated or handled (e.g., by raising a `BalanceSheetCalculationError`).
+    - If successful, iterate through the returned `List[Flow]` objects.
+    - For each `Flow` object:
+        - Update the balances of `flow.from_node` and `flow.to_node` accounts in the `BalanceSheet` by `flow.out_amount` and `flow.in_amount` respectively. (Decrease `from_node` by `out_amount`, increase `to_node` by `in_amount`).
+- **Adapt Capital Gains and Lot Logic**:
+    - The current direct posting effect application (`_apply_direct_posting_effects`) and capital gains processing (`_process_long_sale_capital_gains`, `_process_short_closure_capital_gains`) in `BalanceSheet.apply_transaction` will need to be significantly re-evaluated.
+    - The creation of `Lot` objects and calculation of `CapitalGainResult` should ideally be triggered by specific types of flows or patterns of flows, rather than directly from postings. For example, a flow from an asset account to a cash account, combined with a flow from a P&L account to the cash account, might signify a sale that realizes a gain.
+    - This is a complex part of the refactoring and will require careful design to ensure FIFO logic and gain calculations are correctly integrated with the flow-based updates.
+- **Update Tests**:
+    - Existing tests for `BalanceSheet` (e.g., in `tests/test_balance.py`, `tests/test_balance_short_positions.py`, `tests/test_capital_gains_fifo.py`) will need to be updated to reflect the new flow-based balance update mechanism.
+    - New tests for `src/transaction_flows.py` might be needed if the existing ones in `tests/test_transaction_flows.py` (which were based on a previous version of `transaction_to_flows`) are no longer sufficient or relevant.
 
-- Check existing test files for adherence to the 500-line limit and split if necessary.
-
-Phase 2: Future Steps
-- Design and implement the mechanism for generating new journal entries for capital gains transactions (potentially using stored `CapitalGainResult` data).
+**Phase 3: Future Steps**
+- Design and implement the mechanism for generating new journal entries for capital gains transactions.
 - Design and implement the safe in-place journal file update mechanism.
-- Check existing test files to ensure they adhere to the new 500-line limit and split them if necessary.
+- Check existing test files for adherence to the 500-line limit and split if necessary.
 
 ## Active Decisions and Considerations
 
-- Successfully integrated capital gains calculation directly into the balance sheet building process.
+- Successfully integrated capital gains calculation directly into the balance sheet building process. (This will be refactored in Phase 2).
 - How to efficiently track lots and apply gains/losses to running balances within `calculate_balances_and_lots`. (Implemented)
 - Determining the appropriate income/expense accounts for posting gains/losses (e.g., `income:capital_gains`, `expenses:capital_losses`). (Implemented within `calculate_balances_and_lots`)
 - Structure and storage of `CapitalGainResult` objects: Stored as a list (`capital_gains_realized`) within the `BalanceSheet` object.
@@ -170,7 +202,10 @@ Phase 2: Future Steps
 - The `cost_basis_per_unit` of a short `Lot` stores the proceeds received per unit when the short position was opened.
 - Gain/loss on short positions is calculated as: Initial Proceeds - Cost to Cover.
 - `Posting.get_effect()` is now the primary method for classifying a posting's impact.
-- `BalanceSheet.apply_transaction` uses `get_effect` and checks for existing short lots to differentiate between a genuine `OPEN_LONG` and a `CLOSE_SHORT` (buy-to-cover).
+- `BalanceSheet.apply_transaction` uses `get_effect` and checks for existing short lots to differentiate between a genuine `OPEN_LONG` and a `CLOSE_SHORT` (buy-to-cover). (This will be refactored in Phase 2).
+- **New Direction**: The primary mechanism for updating account balances in `BalanceSheet.apply_transaction` will shift from direct posting analysis to processing `Flow` objects generated by `transaction_to_flows`.
+    - **Lot Management with Flows**: The logic for creating/updating `Lot` objects and calculating `CapitalGainResult` needs to be re-thought to work with `Flow` data. This might involve identifying specific flow patterns that correspond to asset acquisitions, sales, or cost-basis adjustments.
+- The `transaction_to_flows` function in `src/transaction_flows.py` has been replaced with the user-provided logic, adapted to the project's data structures. Price/cost interpretation now correctly uses `Posting.cost` and `CostKind`.
 
 ## Important Patterns and Preferences
 
@@ -192,3 +227,4 @@ Phase 2: Future Steps
 - Debugging CLI test failures requires careful examination of `stdout` and `stderr` from `subprocess.run`.
 - Using the `Result` pattern improves the explicitness of functions that can fail and makes the calling code more robust by forcing explicit handling of `Success` and `Failure` cases.
 - Using the `Maybe` pattern for optional values makes the code more explicit about how potentially missing data is handled.
+- Careful attention to attribute names and class definitions across different modules (`base_classes.py`, `classes.py`, `common_types.py`) is crucial to avoid Pylance errors and runtime issues. The distinction between `Posting.cost` (which is `src.classes.Cost`) and the `Cost` type in `src.common_types.py` (which is different) was a key point of confusion. Similarly, `CostKind` is from `common_types`.

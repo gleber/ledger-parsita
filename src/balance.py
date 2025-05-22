@@ -415,9 +415,13 @@ class BalanceSheet:
             elif isinstance(balance_obj, AssetBalance) and position_effect == PositionEffect.CLOSE_LONG: # Sale of a long asset
                 balance_obj.total_amount += posting.amount
             elif isinstance(balance_obj, AssetBalance) and position_effect == PositionEffect.CLOSE_SHORT: # Covering a short asset
-                balance_obj.total_amount += posting.amount
+                balance_obj.total_amount = Amount(balance_obj.total_amount.quantity + posting.amount.quantity, balance_obj.commodity) # Ensure new Amount
+            elif isinstance(balance_obj, AssetBalance) and position_effect == PositionEffect.OPEN_LONG: # For non-lot creating OPEN_LONG on AssetBalance
+                 balance_obj.total_amount = Amount(balance_obj.total_amount.quantity + posting.amount.quantity, balance_obj.commodity) # Ensure new Amount
             else:
-                raise ValueError(f"Unknown posting effect {posting.to_journal_string()} for {balance_obj} in\n{transaction.to_journal_string()}")
+                # This case should ideally not be reached if all effects on known balance types are handled.
+                # If it is, it implies an unhandled combination of PositionEffect and Balance type.
+                raise ValueError(f"Unhandled posting effect '{position_effect}' for balance type '{type(balance_obj).__name__}' on account '{posting.account.name}' with commodity '{commodity_to_use.name}' in transaction:\n{transaction.to_journal_string()}\nPosting: {posting.to_journal_string()}")
 
             # Propagate all other posting amounts that were not part of lot creation via balance assertion or opening.
             account_node._propagate_total_balance_update(posting.amount)

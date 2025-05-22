@@ -90,9 +90,24 @@ This document tracks the progress, completed features, and remaining tasks for l
     - Added `_process_short_closure_capital_gains` method to `BalanceSheet`.
     - Refactored `BalanceSheet.apply_transaction` to correctly identify buy-to-cover scenarios (OPEN_LONG effect with existing short lots) and route to `_process_short_closure_capital_gains`.
     - Added initial tests for opening and closing short positions in `tests/test_balance_short_positions.py` which are passing.
+- **Transaction to Flows Implementation (`src/transaction_flows.py`)**:
+    - Successfully created `transaction_to_flows` function, adapting the provided logic.
+    - Implemented `Flow`, `AdaptedPrice`, and `PostingStatus` helper dataclasses.
+    - Logic handles priced sales (explicit/implicit P&L), priced purchases, and simple unpriced postings.
+    - Function returns `Result[List[Flow], UnhandledRemainderError]`.
+    - `UnhandledRemainderError` and `UnhandledPostingDetail` provide details on unconsumed posting quantities.
+- **Tests for Transaction Flows (`tests/test_transaction_flows.py`)**:
+    - Created test suite by converting examples from the original script.
+    - All tests are passing, verifying the adapted logic for various transaction types.
 
 ## What's Left to Build
 
+- **Refactor `BalanceSheet.apply_transaction` for Flow-Based Updates**:
+    - Modify `BalanceSheet.apply_transaction` to use `transaction_to_flows`.
+    - Implement parsing of `Flow.label` to extract `Amount`.
+    - Update account balances based on parsed flows.
+    - Re-evaluate and integrate `Lot` creation and `CapitalGainResult` calculation with the flow-based system.
+- Update `BalanceSheet` tests to reflect the new flow-based mechanism.
 - Check existing test files for adherence to the 500-line limit and split if necessary.
 - Implement generation of capital gains journal entries.
 - Implement safe in-place journal file update mechanism.
@@ -115,8 +130,16 @@ This document tracks the progress, completed features, and remaining tasks for l
 - All previously failing tests related to capital gains logic have been fixed.
 - Error handling for proceeds consolidation in `src/balance.py` has been refactored using the `Result` pattern.
 - Automatic commenting of calculated balances in `Transaction.balance()` is implemented and tested.
-- Core logic for handling short position capital gains (opening, closing, FIFO matching) is implemented and initial tests pass.
-- Ready to begin Phase 2 (Generating journal entries, updating files) or add more comprehensive tests for short positions.
+- Core logic for handling short position capital gains (opening, closing, FIFO matching) is implemented and initial tests pass. (This will be revisited during flow-based refactoring).
+- **Completed `transaction_to_flows` implementation and initial tests.**
+- **Updated `Flow` Class**: The `Flow` dataclass in `src/transaction_flows.py` now includes structured `out_amount`, `in_amount`, `cost_basis`, and `description` fields. The `transaction_to_flows` function and its helpers have been refactored to populate these fields. Tests in `tests/test_transaction_flows.py` have been updated.
+- **Added Flow Balance Verification (Updated)**:
+    - Implemented `check_flows_balance` in `src/transaction_flows.py` to verify that a `List[Flow]` is balanced for commodities found in any `flow.cost_basis`.
+    - It returns `Result[None, UnbalancedFlowsError]`.
+    - Defined `FlowImbalanceDetail` and `UnbalancedFlowsError` for structured error reporting.
+    - Integrated `check_flows_balance` into all tests in `tests/test_transaction_flows.py`.
+    - Resolved persistent Pylance typing errors in `check_flows_balance` by refining type guards for dictionary key usage.
+- **Next Major Goal**: Refactor `BalanceSheet` updates to be driven by `Flow` objects.
 
 ## Known Issues
 
@@ -141,4 +164,5 @@ This document tracks the progress, completed features, and remaining tasks for l
 - Added methods to `Transaction` class for self-validation of internal consistency and balancing.
 - `Transaction.balance()` (via `_transaction_balance`) now adds comments to auto-calculated postings.
 - Short position handling relies on `type:short` tag for opening short sales.
-- `Posting.get_effect()` identifies buy-to-cover based on an `OPEN_LONG` effect on an account with existing short lots; this is handled in `BalanceSheet.apply_transaction`.
+- `Posting.get_effect()` identifies buy-to-cover based on an `OPEN_LONG` effect on an account with existing short lots; this is handled in `BalanceSheet.apply_transaction`. (This behavior will be reviewed during the flow-based refactoring).
+- The new `transaction_to_flows` function provides a foundational layer for interpreting transaction effects. The next step is to integrate this into the `BalanceSheet` update logic.

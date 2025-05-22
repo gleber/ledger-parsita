@@ -23,12 +23,15 @@ from .classes import JournalEntry
 
 from .errors import (
     TransactionBalanceError,
+    TransactionIntegrityError, # Added missing import
     NoCommoditiesElidedError,
     ImbalanceError,
     UnresolvedElidedAmountError,
     AmbiguousElidedAmountError,
     VerificationError,
+    AcquisitionMissingDatedSubaccountError,
 )
+from .filtering import Filters
 
 
 @dataclass
@@ -87,7 +90,7 @@ class Journal(PositionAware["Journal"]):
         # Create a new Journal instance with the flattened entries
         return Journal(entries=flattened_entries, source_location=self.source_location)
 
-    def balance(self) -> Result["Journal", TransactionBalanceError]:
+    def balance(self) -> Result["Journal", Union[TransactionBalanceError, TransactionIntegrityError]]:
         """
         Attempts to balance all transactions within the journal.
         Returns a new Journal with balanced transactions if all transactions balance successfully.
@@ -114,7 +117,7 @@ class Journal(PositionAware["Journal"]):
 
     @staticmethod
     def parse_from_file(
-        filename: str,
+        filename: Union[str, Path],
         *,
         query: Optional["Filters"] = None,
         flat: bool = False,

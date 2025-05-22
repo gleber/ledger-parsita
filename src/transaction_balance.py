@@ -20,9 +20,6 @@ from dataclasses import replace
 from decimal import Decimal
 
 from returns.result import Result, Success, Failure
-# from returns.pipeline import flow # Not used directly in this file
-# from returns.pointfree import bind # Not used directly in this file
-# from returns.maybe import Maybe, Some, Nothing # Not used directly in this file
 
 
 def _transaction_balance(tx: "Transaction") -> Result["Transaction", TransactionBalanceError]:
@@ -43,11 +40,10 @@ def _transaction_balance(tx: "Transaction") -> Result["Transaction", Transaction
 
             # If there's a cost, this posting also contributes to the balance of the cost's commodity.
             # The value of this posting in terms of the cost commodity is added.
-            if (
-                posting.cost
-                and isinstance(posting.cost, Cost)
-                and isinstance(posting.cost.amount, Amount)
-            ):
+            if posting.cost:
+                assert isinstance(posting.cost, Cost)
+                assert isinstance(posting.cost.amount, Amount)
+            
                 cost_commodity = posting.cost.amount.commodity
                 cost_price_per_unit_or_total = posting.cost.amount.quantity
 

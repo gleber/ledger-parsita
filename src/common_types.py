@@ -15,9 +15,15 @@ from returns.maybe import Maybe # Import Maybe types
 # but needed for type hints here. Use forward references.
 # from .ledger_entities import Commodity, Amount
 
-# Global instance (not a true singleton with __init__)
-# This needs to be defined before SourceCacheManager uses it.
-source_cache_manager = None # Will be initialized below
+from typing import TYPE_CHECKING
+
+# Assuming Commodity and Amount will be in ledger_entities.py, # This comment is outdated
+# but needed for type hints here. Use forward references.
+# from .ledger_entities import Commodity, Amount
+
+if TYPE_CHECKING:
+    from .base_classes import Commodity, Amount
+
 
 class SourceCacheManager:
     """Manages caching of file content and newline offsets for efficient position lookup."""
@@ -64,8 +70,8 @@ class SourceCacheManager:
 
         return line, column
 
-# Global instance (not a true singleton with __init__)
-source_cache_manager = SourceCacheManager()
+# Global instance, type hinted for clarity
+source_cache_manager: SourceCacheManager = SourceCacheManager()
 
 
 class PositionAware(Generic[Output]):

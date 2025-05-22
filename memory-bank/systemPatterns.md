@@ -63,19 +63,24 @@ This document describes the system architecture and key design patterns used in 
 - Transaction Validation Pattern: The `Transaction` class in `src/classes.py` now includes methods (`validate_internal_consistency`, `is_balanced`) for checking its own integrity and balance based on its postings.
     - The `balance` method (which now calls the standalone `_transaction_balance` function from `src/transaction_balance.py`), if successful in resolving elided amounts, results in a transaction copy where a comment "; auto-balanced" is added to the postings whose amounts were calculated. This comment is appended to any existing comment on the posting.
     - This uses the `Result` pattern and custom error types (`TransactionIntegrityError`, `TransactionBalanceError` and their subtypes) for clear error reporting.
+- Transaction Flow Pattern: A new component (`src/transaction_flows.py`) provides the `transaction_to_flows` function.
+    - This function analyzes a `Transaction` object and converts its economic effects into a list of `Flow` objects.
+    - Each `Flow` now has structured fields: `from_node: str`, `to_node: str`, `out_amount: Amount`, `in_amount: Amount`, `cost_basis: Optional[Amount]`, and `description: Optional[str]`. This replaces the previous string-based `label`.
+    - It aims to decompose complex transactions (like sales with P&L, or purchases) into simpler, directed value movements with clear financial data.
+    - It returns a `Result[List[Flow], UnhandledRemainderError]`, indicating success or detailing any posting amounts that couldn't be fully allocated into flows.
+    - This pattern is intended to become a foundational layer for how `BalanceSheet.apply_transaction` processes transactions.
 
 ## Component Relationships
 
 - The Parser reads the journal file(s) and produces a `Journal` object containing `Transaction` and other entries. Each `Transaction` object can now self-validate its internal consistency and whether its postings balance per commodity.
 - The `Journal` object is processed by `BalanceSheet.from_journal` (which internally uses `BalanceSheet.from_transactions` that iteratively calls `BalanceSheet.apply_transaction`).
-- The `BalanceSheet.apply_transaction` method:
-    - Uses `posting.get_effect()` to determine the nature of the posting.
-    - If an `OPEN_LONG` effect occurs on an account with existing short lots, it's treated as a `CLOSE_SHORT` and routes to `_process_short_closure_capital_gains`.
-    - Otherwise, for `CLOSE_LONG`, it calls `_process_long_sale_capital_gains`.
-    - For genuine `OPEN_LONG` or `OPEN_SHORT` (not closing existing positions), it calls `_apply_direct_posting_effects` which uses `Lot.try_create_from_posting` to create the new lot.
-    - `_process_long_sale_capital_gains` uses `_get_consolidated_proceeds` and `_perform_fifo_matching_and_gains_for_long_closure`.
-    - `_process_short_closure_capital_gains` uses `_get_consolidated_cost_to_cover` and `_perform_fifo_matching_and_gains_for_short_closure`.
-- The final `BalanceSheet` produced contains all account balances and a list of detailed `CapitalGainResult` objects for both long and short position closures.
+- **Future Direction for `BalanceSheet.apply_transaction`**:
+    - It will first call `transaction_to_flows(transaction)` from `src/transaction_flows.py`.
+    - If successful, it will iterate over the generated `Flow` objects. For each flow:
+        - It will parse the `Amount` from the `Flow.label`.
+        - It will update the balances of the `from_node` and `to_node` accounts.
+    - The existing logic within `BalanceSheet.apply_transaction` for direct posting effects (`_apply_direct_posting_effects`) and capital gains (`_process_long_sale_capital_gains`, `_process_short_closure_capital_gains`) will be refactored to work with or be triggered by these flows, rather than directly analyzing postings.
+- The final `BalanceSheet` produced will contain all account balances and a list of detailed `CapitalGainResult` objects.
 - The CLI (`src/main.py`):
     - Uses a custom `click.ParamType` to parse filter strings.
     - Calls `Journal.parse_from_file` to get a `Journal` object (or a `Failure`).
